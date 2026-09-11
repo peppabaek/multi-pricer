@@ -1,0 +1,84 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 2027 >>
+stream
+BT
+/F1 9 Tf
+12 TL
+36 760 Td
+(CONFIRMATION) Tj T*
+(INTEREST RATE SWAP TRANSACTION) Tj T*
+() Tj T*
+(Date: 11 September 2026) Tj T*
+(To: Daehan Investment Bank Co., Ltd.) Tj T*
+(Attention: Mr. Jinwoo Seo, Fixed Income Desk) Tj T*
+(Email: jinwoo.seo@daehan-ib.co.kr) Tj T*
+(Tel: +82 2-6789-1234) Tj T*
+(Our Reference: WRB-IRS-2026-1180) Tj T*
+() Tj T*
+(Party A: Woori Bank) Tj T*
+(Party B: Daehan Investment Bank Co., Ltd.) Tj T*
+(LEI: 9845009F7B2CD1A3E704) Tj T*
+(Account Number: 1002-455-778901) Tj T*
+() Tj T*
+(The purpose of this letter is to confirm the terms and conditions of the) Tj T*
+(Transaction entered into between us on the Trade Date specified below.) Tj T*
+() Tj T*
+(1. GENERAL TERMS) Tj T*
+(Trade Date:                      11 September 2026) Tj T*
+(Effective Date:                  15 September 2026) Tj T*
+(Termination Date:                15 September 2031) Tj T*
+(Notional Amount:                 KRW 50,000,000,000) Tj T*
+(Business Days:                   Seoul) Tj T*
+(Business Day Convention:         Modified Following) Tj T*
+() Tj T*
+(2. FIXED AMOUNTS) Tj T*
+(Fixed Rate Payer:                Party B) Tj T*
+(Fixed Rate:                      2.7200 per cent per annum) Tj T*
+(Fixed Rate Day Count Fraction:   Act/365 Fixed) Tj T*
+(Fixed Rate Payer Payment Dates:  Quarterly, commencing 15 December 2026) Tj T*
+(Fixed Rate Payer Period End Dates: Adjusted) Tj T*
+() Tj T*
+(3. FLOATING AMOUNTS) Tj T*
+(Floating Rate Payer:             Party A) Tj T*
+(Floating Rate Option:            KRW-CD-91D) Tj T*
+(Designated Maturity:             3 months) Tj T*
+(Floating Rate Day Count Fraction: Act/365 Fixed) Tj T*
+(Floating Rate Payer Payment Dates: Quarterly) Tj T*
+(Reset Dates:                     First day of each Calculation Period) Tj T*
+(Compounding:                     Inapplicable) Tj T*
+() Tj T*
+(4. ACCOUNT DETAILS) Tj T*
+(Payments to Party B: Daehan Investment Bank Co., Ltd.) Tj T*
+(IBAN: KR29 0020 1234 5678 9012) Tj T*
+() Tj T*
+(Yours faithfully,) Tj T*
+(For and on behalf of Woori Bank) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000002320 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+2390
+%%EOF

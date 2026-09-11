@@ -1,0 +1,587 @@
+/* ==========================================================================
+   Trading desk layer — loaded after styles.css, overrides only what it must.
+
+   Intent: read like a pricing terminal, not a web app. Colour carries meaning
+   (sign, state, severity) and nothing else; every figure is monospaced and
+   tabular so columns of numbers line up; decoration is spent only where it
+   separates one object from another.
+   ========================================================================== */
+
+:root {
+    /* Surfaces — cool neutrals biased toward the accent, not pure grey */
+    --t-chrome:        #10161f;   /* header / darkest chrome */
+    --t-chrome-2:      #1a2331;   /* raised chrome */
+    --t-chrome-line:   #2c3949;
+    --t-canvas:        #eef1f5;   /* app background */
+    --t-surface:       #ffffff;   /* panels */
+    --t-sunk:          #f4f6f9;   /* toolbars, table heads */
+    --t-line:          #d5dbe4;
+    --t-line-soft:     #e6eaf0;
+
+    /* Ink */
+    --t-ink:           #121821;
+    --t-ink-2:         #47536a;
+    --t-ink-3:         #7b8799;
+    --t-on-chrome:     #e8edf5;
+    --t-on-chrome-2:   #93a2b8;
+
+    /* One accent. Semantic colours are separate and mean sign or state. */
+    --t-accent:        #1f4e79;
+    --t-accent-soft:   #e7eff7;
+    --t-accent-line:   #b9cde2;
+
+    --t-pos:           #1b6349;   /* receive / positive */
+    --t-pos-soft:      #e3f0ea;
+    --t-neg:           #a32018;   /* pay / negative */
+    --t-neg-soft:      #f9e8e6;
+    --t-warn:          #8a5a00;
+    --t-warn-soft:     #fbf1dc;
+
+    --t-radius:        3px;
+    --t-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+
+/* ---------- base ---------------------------------------------------------- */
+body {
+    background: var(--t-canvas);
+    color: var(--t-ink);
+    font-size: 12.5px;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Every figure the desk reads is monospaced and column-aligned. */
+.mono, .stat-val, .hero-val, .data-table td.num, .data-table th.num,
+.quote-table td, .timestamp-value, .clock-display, .delta-val,
+input[type="text"], input[type="number"], input[type="date"], select {
+    font-family: var(--t-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---------- header: flat chrome, no gradient, no glow --------------------- */
+.app-header, .terminal-header {
+    background: var(--t-chrome);
+    border-bottom: 1px solid var(--t-chrome-line);
+    box-shadow: none;
+    height: 46px;
+    min-height: 46px;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+}
+.header-left, .header-center, .header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    min-width: 0;
+}
+.header-right { margin-left: auto; }
+
+.logo-container { gap: 7px; flex-shrink: 0; }
+.logo-icon { display: none; }
+.app-title {
+    color: var(--t-on-chrome);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .08em;
+}
+.app-title .highlight { color: var(--t-on-chrome); text-shadow: none; opacity: .62; }
+.version-tag {
+    background: transparent;
+    color: var(--t-on-chrome-2);
+    border: 1px solid var(--t-chrome-line);
+    border-radius: var(--t-radius);
+    padding: 1px 5px;
+    font-family: var(--t-mono);
+    font-size: 9.5px;
+    letter-spacing: .04em;
+}
+
+/* Product switcher reads as terminal tabs, not pills */
+.currency-toggle-group {
+    background: transparent;
+    border: 1px solid var(--t-chrome-line);
+    border-radius: var(--t-radius);
+    padding: 2px;
+    gap: 2px;
+    display: flex;
+}
+.currency-toggle-btn {
+    background: transparent;
+    border: none;
+    color: var(--t-on-chrome-2);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    padding: 4px 10px;
+    border-radius: 2px;
+    cursor: pointer;
+    text-shadow: none;
+    transition: background .12s ease, color .12s ease;
+}
+.currency-toggle-btn:hover { background: rgba(255, 255, 255, .06); color: var(--t-on-chrome); }
+.currency-toggle-btn.active {
+    background: var(--t-on-chrome);
+    color: var(--t-chrome);
+    box-shadow: none;
+}
+
+.market-source { gap: 6px; }
+.source-text { color: var(--t-on-chrome-2); font-size: 11px; }
+.source-icon { display: none; }
+.live-connected-badge {
+    font-family: var(--t-mono);
+    font-size: 9.5px;
+    letter-spacing: .05em;
+    color: #6bc5a0;
+    background: rgba(107, 197, 160, .12);
+    border: 1px solid rgba(107, 197, 160, .3);
+    border-radius: var(--t-radius);
+    padding: 1px 6px;
+    text-shadow: none;
+}
+.btn-xs-connect {
+    background: transparent;
+    border: 1px solid var(--t-chrome-line);
+    color: var(--t-on-chrome-2);
+    border-radius: var(--t-radius);
+    font-size: 10px;
+    padding: 3px 7px;
+    cursor: pointer;
+}
+.btn-xs-connect:hover { color: var(--t-on-chrome); border-color: var(--t-on-chrome-2); }
+
+.snapshot-timer-container { gap: 6px; }
+.snapshot-label { color: var(--t-on-chrome-2); font-size: 10.5px; letter-spacing: .04em; }
+.timestamp-value { color: var(--t-on-chrome); font-size: 12px; font-weight: 500; }
+.status-indicator { display: none; }
+
+.clock-display {
+    background: transparent;
+    border: 1px solid var(--t-chrome-line);
+    color: var(--t-on-chrome);
+    border-radius: var(--t-radius);
+    font-size: 11.5px;
+    padding: 3px 8px;
+    letter-spacing: .03em;
+}
+.shortcut-hints { gap: 5px; }
+.kbd-badge {
+    color: var(--t-on-chrome-2);
+    font-size: 9.5px;
+    letter-spacing: .03em;
+}
+.kbd-badge kbd {
+    font-family: var(--t-mono);
+    background: rgba(255, 255, 255, .07);
+    border: 1px solid var(--t-chrome-line);
+    border-radius: 2px;
+    padding: 1px 4px;
+    color: var(--t-on-chrome);
+}
+.kbd-badge.highlight kbd { background: rgba(255, 255, 255, .16); }
+
+/* ---------- layout: give the risk column real estate ---------------------
+   The results column carries par, NPV, DV01 and the key-rate buckets - the
+   figures the desk actually trades on - so it scales with the window instead
+   of sitting at a fixed 350px while the input form takes the surplus. */
+.terminal-grid {
+    grid-template-columns:
+        minmax(300px, 1fr)
+        minmax(560px, 1.75fr)
+        minmax(400px, 1.25fr);
+    gap: 12px;
+    padding: 10px 14px;
+}
+
+@media (max-width: 1500px) {
+    .terminal-grid {
+        grid-template-columns: minmax(280px, 1fr) minmax(520px, 1.6fr) minmax(360px, 1.2fr);
+    }
+}
+@media (max-width: 1240px) {
+    .terminal-grid { grid-template-columns: 1fr 1fr; }
+    .panel-results { grid-column: 1 / -1; }
+}
+
+/* ---------- panels: one border, no stacked shadows ----------------------- */
+.panel {
+    background: var(--t-surface);
+    border: 1px solid var(--t-line);
+    border-radius: var(--t-radius);
+    box-shadow: none;
+}
+.panel-header {
+    background: var(--t-sunk);
+    border-bottom: 1px solid var(--t-line);
+    padding: 7px 12px;
+    min-height: 34px;
+}
+.panel-title { gap: 7px; }
+.panel-title .icon { display: none; }
+.panel-title h2 {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--t-ink-2);
+}
+.badge-tag {
+    font-family: var(--t-mono);
+    font-size: 9.5px;
+    letter-spacing: .03em;
+    background: var(--t-accent-soft);
+    color: var(--t-accent);
+    border: 1px solid var(--t-accent-line);
+    border-radius: var(--t-radius);
+    padding: 2px 6px;
+}
+
+/* ---------- stat pills: data first --------------------------------------- */
+.quick-stats-strip {
+    background: var(--t-sunk);
+    border-bottom: 1px solid var(--t-line-soft);
+    gap: 0;
+    padding: 0;
+    display: flex;
+}
+.stat-pill {
+    flex: 1;
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--t-line-soft);
+    border-radius: 0;
+    padding: 7px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+.stat-pill:last-child { border-right: none; }
+.stat-lbl {
+    font-size: 9.5px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--t-ink-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.stat-val { font-size: 14px; font-weight: 600; color: var(--t-ink); }
+.stat-val.stat-fix { color: var(--t-accent); }
+
+/* ---------- hero result cards: the three numbers that matter ------------- */
+.result-hero-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--t-line);
+    border-bottom: 1px solid var(--t-line);
+    padding: 0;
+    margin: 0;
+}
+.hero-card {
+    background: var(--t-surface);
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 11px 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+/* Labels wrap rather than truncate - a clipped "PVO1 / DVO1 (1..." tells the
+   reader nothing, and these three labels are how the figures are identified. */
+.hero-label {
+    font-size: 9px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--t-ink-3);
+    font-weight: 700;
+    line-height: 1.3;
+    white-space: normal;
+    overflow: visible;
+}
+.hero-val {
+    font-size: clamp(16px, 1.35vw, 22px);
+    font-weight: 600;
+    color: var(--t-ink);
+    letter-spacing: -.01em;
+    line-height: 1.15;
+    white-space: nowrap;
+}
+.hero-val .unit { font-size: 10px; color: var(--t-ink-3); font-weight: 500; margin-left: 2px; }
+.hero-sub {
+    font-family: var(--t-mono);
+    font-size: 9.5px;
+    color: var(--t-ink-3);
+    line-height: 1.35;
+    white-space: normal;
+    word-break: break-word;
+}
+/* The par rate is the anchor figure; give it the accent and nothing else.
+   The other two keep one neutral rule each - a blue/green/purple stripe set
+   encodes nothing, and colour here should mean sign or state, not identity. */
+.hero-card { border-left: 2px solid var(--t-line); }
+.hero-par { border-left-color: var(--t-accent); }
+.hero-par .hero-val { color: var(--t-accent); }
+.hero-npv::before, .hero-dv01::before, .hero-par::before { display: none; }
+
+/* ---------- tables: dense, aligned, quiet -------------------------------- */
+.data-table { font-size: 11.5px; border-collapse: collapse; }
+.data-table th {
+    background: var(--t-sunk);
+    border-bottom: 1px solid var(--t-line);
+    color: var(--t-ink-3);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    padding: 6px 9px;
+    white-space: nowrap;
+}
+.data-table td {
+    border-bottom: 1px solid var(--t-line-soft);
+    padding: 5px 9px;
+    color: var(--t-ink);
+}
+.data-table tbody tr:hover { background: var(--t-accent-soft); }
+.data-table td.num, .data-table th.num { text-align: right; }
+.table-sub-header {
+    background: var(--t-sunk);
+    border-bottom: 1px solid var(--t-line-soft);
+    color: var(--t-ink-3);
+    font-size: 9.5px;
+    letter-spacing: .03em;
+    padding: 4px 9px;
+}
+
+/* Sign carries colour; nothing else in a number cell does. */
+.positive, .val-positive { color: var(--t-pos); }
+.negative, .val-negative { color: var(--t-neg); }
+
+/* ---------- inputs: terminal fields, not web forms ----------------------- */
+input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    background: var(--t-surface);
+    border: 1px solid var(--t-line);
+    border-radius: var(--t-radius);
+    color: var(--t-ink);
+    font-size: 12px;
+    padding: 5px 7px;
+    transition: border-color .12s ease;
+}
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--t-accent);
+    box-shadow: 0 0 0 2px var(--t-accent-soft);
+}
+label, .form-label, .param-label {
+    font-size: 9.5px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--t-ink-3);
+    font-weight: 600;
+}
+
+/* ---------- buttons ------------------------------------------------------ */
+.btn-primary, .btn-calculate {
+    background: var(--t-accent);
+    border: 1px solid var(--t-accent);
+    border-radius: var(--t-radius);
+    color: #fff;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    box-shadow: none;
+}
+.btn-primary:hover, .btn-calculate:hover { background: #18405f; }
+.btn-sm-outline, .btn-icon-refresh {
+    background: var(--t-surface);
+    border: 1px solid var(--t-line);
+    border-radius: var(--t-radius);
+    color: var(--t-ink-2);
+    font-size: 10.5px;
+    box-shadow: none;
+}
+.btn-sm-outline:hover, .btn-icon-refresh:hover {
+    border-color: var(--t-accent);
+    color: var(--t-accent);
+}
+
+/* The F9 one-shot is the primary action; make it read as weight, not as a gradient. */
+.btn-oneshot {
+    background: var(--t-chrome);
+    border: 1px solid var(--t-chrome);
+    border-radius: var(--t-radius);
+    color: var(--t-on-chrome);
+    box-shadow: none;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .04em;
+}
+.btn-oneshot:hover { background: #1c2735; border-color: #1c2735; }
+.btn-oneshot .btn-icon { display: none; }
+.btn-oneshot .btn-sub-text, .btn-oneshot .btn-shortcut {
+    font-family: var(--t-mono);
+    font-size: 9.5px;
+    opacity: .7;
+    font-weight: 500;
+}
+
+/* ---------- status badges ------------------------------------------------ */
+.calc-status-badge {
+    font-family: var(--t-mono);
+    font-size: 9.5px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    border-radius: var(--t-radius);
+    padding: 2px 7px;
+    border: 1px solid transparent;
+}
+.calc-status-badge.calc-ready   { background: var(--t-pos-soft);  color: var(--t-pos);  border-color: #b7dccb; }
+.calc-status-badge.calc-loading { background: var(--t-accent-soft); color: var(--t-accent); border-color: var(--t-accent-line); }
+.calc-status-badge.calc-offline { background: var(--t-neg-soft);  color: var(--t-neg);  border-color: #e9bdb8; }
+
+/* ---------- risk bars: the shape is the data ----------------------------- */
+.delta-bars-container { padding: 8px 12px; }
+.delta-item { gap: 8px; padding: 2px 0; }
+.delta-label {
+    font-family: var(--t-mono);
+    font-size: 10px;
+    color: var(--t-ink-3);
+    min-width: 34px;
+}
+.delta-bar-track { background: var(--t-sunk); border-radius: 1px; height: 9px; }
+.delta-bar-fill { background: var(--t-accent); border-radius: 1px; }
+.delta-bar-fill.negative { background: var(--t-neg); }
+.delta-val { font-size: 10.5px; font-weight: 600; }
+.section-title {
+    font-size: 10px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--t-ink-2);
+    font-weight: 700;
+    padding: 8px 12px 0 12px;
+}
+
+/* ---------- ticket bar: tabs, not chips ---------------------------------- */
+.quote-tickets-workspace-bar {
+    background: var(--t-sunk);
+    border-bottom: 1px solid var(--t-line);
+    padding: 0 6px;
+    min-height: 32px;
+}
+.quote-ticket-pill {
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: var(--t-radius) var(--t-radius) 0 0;
+    font-size: 10.5px;
+    padding: 5px 9px;
+    color: var(--t-ink-2);
+    box-shadow: none;
+}
+.quote-ticket-pill.active {
+    background: var(--t-surface);
+    border-color: var(--t-line);
+    color: var(--t-ink);
+    font-weight: 700;
+}
+.quote-ticket-pill.needs-review { border-color: var(--t-warn); }
+.ticket-rate-tag { font-family: var(--t-mono); font-variant-numeric: tabular-nums; }
+.ticket-status-dot { font-size: 8px; }
+.ticket-status-dot.live  { color: var(--t-pos); }
+.ticket-status-dot.stale { color: var(--t-ink-3); }
+
+/* ---------- term sheet zone: matches the terminal, keeps its semantics ---- */
+.ts-idle {
+    border: 1px dashed var(--t-line);
+    border-radius: var(--t-radius);
+    background: var(--t-sunk);
+    padding: 9px 12px;
+    gap: 10px;
+}
+.ts-idle:hover, .ts-idle.dragover {
+    border-color: var(--t-accent);
+    background: var(--t-accent-soft);
+}
+.ts-idle .ts-icon {
+    font-family: var(--t-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    color: var(--t-accent);
+    border: 1px solid var(--t-accent-line);
+    border-radius: 2px;
+    padding: 2px 5px;
+    background: var(--t-surface);
+}
+.ts-copy strong { font-size: 11.5px; letter-spacing: .02em; }
+.ts-copy span { font-size: 10px; color: var(--t-ink-3); }
+
+/* Extraction unavailable (no API key): still visible, plainly inert */
+.ts-idle.ts-unavailable { border-style: solid; border-color: var(--t-line); opacity: .72; }
+.ts-idle.ts-unavailable .ts-icon { color: var(--t-ink-3); border-color: var(--t-line); }
+.ts-idle.ts-unavailable .ts-copy span { color: var(--t-warn); }
+.ts-busy {
+    border: 1px solid var(--t-accent-line);
+    background: var(--t-accent-soft);
+    color: var(--t-accent);
+    border-radius: var(--t-radius);
+    font-size: 11.5px;
+}
+.ts-review { border: 1px solid var(--t-line); border-radius: var(--t-radius); }
+.ts-field { border-radius: 2px; background: var(--t-sunk); }
+.ts-field .v { font-family: var(--t-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- chart ------------------------------------------------------- */
+.curve-chart-card {
+    border: none;
+    border-bottom: 1px solid var(--t-line-soft);
+    border-radius: 0;
+    background: var(--t-surface);
+    box-shadow: none;
+    padding: 8px 12px;
+}
+.chart-title {
+    font-size: 9.5px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--t-ink-3);
+    font-weight: 700;
+}
+.chart-legend { font-size: 9.5px; color: var(--t-ink-3); }
+
+/* ---------- misc ---------------------------------------------------------- */
+.toast {
+    border-radius: var(--t-radius);
+    font-size: 11.5px;
+    box-shadow: 0 2px 10px rgba(18, 24, 33, .16);
+}
+.modal-backdrop { background: rgba(16, 22, 31, .55); }
+.quote-modal {
+    border-radius: var(--t-radius);
+    border: 1px solid var(--t-line);
+    box-shadow: 0 12px 40px rgba(18, 24, 33, .22);
+}
+.modal-header h3 {
+    font-size: 12px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--t-ink-2);
+}
+
+/* Scrollbars that don't shout */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: var(--t-sunk); }
+::-webkit-scrollbar-thumb { background: #c3ccd8; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--t-ink-3); }
+
+@media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

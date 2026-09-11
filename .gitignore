@@ -1,0 +1,118 @@
+# ==========================================================================
+# Secrets and credentials — never commit
+# ==========================================================================
+.env
+.env.*
+!.env.example
+
+# LSEG / Refinitiv Workspace app key. This file holds a live production key and
+# the organisation's product identity; it is configured per machine, not shared.
+lseg_config.json
+lseg_credentials.json
+secrets.json
+*credentials*.json
+*_secret*
+*.pem
+*.key
+*.pfx
+
+# ==========================================================================
+# Market data captures — large, and they contain live quote data
+# ==========================================================================
+pyeikon.*.log
+pyeikon.*.log.*
+*.log
+
+# ==========================================================================
+# Internal reference material
+# Bank workbooks and counterparty documents. Kept out of version control by
+# default; if the desk wants them versioned, use a private repo and drop these
+# lines deliberately rather than by accident.
+# ==========================================================================
+reference/
+*.xlsm
+*.xlsb
+
+# Real term sheets, if any are ever dropped in for testing.
+# The synthetic samples under sample_termsheets/ are generated and safe.
+termsheets_in/
+*_REAL_*.pdf
+
+# ==========================================================================
+# One-off exploration scripts and dumps
+# Kept local: ~190 files of throwaway diagnostics, several of which contain
+# hardcoded RICs and at least one hardcoded app key.
+# ==========================================================================
+scratch/
+
+# ==========================================================================
+# Generated artefacts
+# ==========================================================================
+etc/*.png
+dashboard*.png
+*.tmp
+
+# ==========================================================================
+# Python
+# ==========================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Environments
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ==========================================================================
+# IDE / OS
+# ==========================================================================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+.gemini/
+.tempmediaStorage/

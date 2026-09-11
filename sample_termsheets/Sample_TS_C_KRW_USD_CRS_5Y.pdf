@@ -1,0 +1,68 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 1391 >>
+stream
+BT
+/F1 9 Tf
+12 TL
+36 760 Td
+(CROSS CURRENCY SWAP - TERM SHEET) Tj T*
+() Tj T*
+(Counterparty:               Sunrise Asset Management) Tj T*
+(Beneficiary:                Sunrise Global Fund II) Tj T*
+(Our Ref: SAM-CRS-2026-0442) Tj T*
+(Contact Telephone: 02-778-9900) Tj T*
+() Tj T*
+(Trade Date:                 11 September 2026) Tj T*
+(Effective Date:             15 September 2026) Tj T*
+(Termination Date:           15 September 2031) Tj T*
+(Spot FX Rate \(USD/KRW\):     1,375.50) Tj T*
+() Tj T*
+(USD LEG \(Party A pays\)) Tj T*
+(Notional:                   USD 10,000,000) Tj T*
+(Rate:                       USD-SOFR compounded) Tj T*
+(Day Count:                  Act/360) Tj T*
+(Payment Frequency:          Semi-annual) Tj T*
+(Business Centres:           Seoul and New York) Tj T*
+() Tj T*
+(KRW LEG \(Party A receives\)) Tj T*
+(Notional:                   KRW 13,755,000,000) Tj T*
+(Fixed Rate:                 1.0800 per cent per annum) Tj T*
+(Day Count:                  30/360) Tj T*
+(Payment Frequency:          Semi-annual) Tj T*
+(Business Centres:           Seoul and New York) Tj T*
+() Tj T*
+(PRINCIPAL EXCHANGE) Tj T*
+(Initial Exchange:           Applicable, on the Effective Date) Tj T*
+(Final Exchange:             Applicable, on the Termination Date) Tj T*
+() Tj T*
+(Business Day Convention:    Modified Following) Tj T*
+(Payment Lag:                2 business days) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001684 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1754
+%%EOF

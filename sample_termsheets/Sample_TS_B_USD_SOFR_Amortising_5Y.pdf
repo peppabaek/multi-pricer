@@ -1,0 +1,74 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 1634 >>
+stream
+BT
+/F1 9 Tf
+12 TL
+36 760 Td
+(TERM SHEET - USD SOFR OVERNIGHT INDEX SWAP \(AMORTISING\)) Tj T*
+() Tj T*
+(Counterparty: Pacific Rim Capital Markets LLC) Tj T*
+(Contact: Sarah Whitfield) Tj T*
+(Email: s.whitfield@pacificrimcm.com) Tj T*
+(Trade ID: PRCM-OIS-88213) Tj T*
+() Tj T*
+(Trade Date:                 11-Sep-2026) Tj T*
+(Effective Date:             15-Sep-2026) Tj T*
+(Maturity Date:              15-Sep-2031) Tj T*
+(Initial Notional:           USD 100,000,000) Tj T*
+(Currency:                   USD) Tj T*
+(Direction:                  Client pays fixed) Tj T*
+() Tj T*
+(FIXED LEG) Tj T*
+(Fixed Rate:                 3.6500%) Tj T*
+(Day Count:                  Act/360) Tj T*
+(Payment Frequency:          Annual) Tj T*
+(Business Day Convention:    Modified Following) Tj T*
+(Business Centres:           New York) Tj T*
+(Roll Convention:            Adjusted) Tj T*
+() Tj T*
+(FLOATING LEG) Tj T*
+(Index:                      USD-SOFR \(compounded in arrears\)) Tj T*
+(Day Count:                  Act/360) Tj T*
+(Payment Frequency:          Annual) Tj T*
+(Payment Delay:              2 business days) Tj T*
+(Business Centres:           New York) Tj T*
+() Tj T*
+(AMORTISATION SCHEDULE) Tj T*
+(Period    From          To            Notional \(USD\)) Tj T*
+(1         15-Sep-2026   15-Sep-2027   100,000,000) Tj T*
+(2         15-Sep-2027   15-Sep-2028    80,000,000) Tj T*
+(3         15-Sep-2028   15-Sep-2029    60,000,000) Tj T*
+(4         15-Sep-2029   15-Sep-2030    40,000,000) Tj T*
+(5         15-Sep-2030   15-Sep-2031    20,000,000) Tj T*
+() Tj T*
+(This term sheet is indicative only and does not constitute an offer.) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001927 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1997
+%%EOF

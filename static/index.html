@@ -1,0 +1,1187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOFR & KRW IRS Live Pricer Dashboard | LSEG Workspace & Tradeweb / KMBC Feed</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=3.6">
+    <link rel="stylesheet" href="terminal.css?v=1">
+    <!-- SheetJS for Excel Schedule Template Download & Upload -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body class="theme-light">
+
+    <!-- Top Navigation Bar & Connection Status -->
+    <header class="app-header">
+        <div class="header-left">
+            <div class="logo-container">
+                <span class="logo-icon">⚡</span>
+                <h1 class="app-title">MULTI<span class="highlight">PRICER</span></h1>
+                <span class="version-tag">v3.0 PRO</span>
+            </div>
+
+            <!-- Currency / Product Toggle Switcher -->
+            <div class="currency-toggle-group" id="currency-toggle-group">
+                <button type="button" class="currency-toggle-btn active" data-currency="USD" id="btn-curr-usd">🇺🇸 USD SOFR</button>
+                <button type="button" class="currency-toggle-btn" data-currency="KRW" id="btn-curr-krw">🇰🇷 KRW CD IRS</button>
+                <button type="button" class="currency-toggle-btn" data-currency="KRW_KOFR" id="btn-curr-kofr">🇰🇷 KRW KOFR OIS</button>
+                <button type="button" class="currency-toggle-btn" data-currency="KRW_CRS" id="btn-curr-crs">🌐 KRW FX SOFR (CRS)</button>
+                <button type="button" class="currency-toggle-btn" data-currency="USD_FWD" id="btn-curr-fwd">📈 FX FWD / SP</button>
+            </div>
+
+            <div class="market-source">
+                <span class="source-icon">📡</span>
+                <span class="source-text" id="feed-status-text">LSEG Workspace</span>
+                <span class="live-connected-badge" id="live-connected-badge">● LIVE</span>
+                <button type="button" class="btn-xs-connect" id="btn-open-appkey-modal" title="LSEG Workspace App Key Config">🔑 Key</button>
+                <button type="button" class="btn-xs-connect btn-holiday-sync" id="btn-sync-holidays-lseg" title="LSEG Workspace 공휴일 동기화 (SEB, NYB, LNB, TKB, TGT 및 대체공휴일 자동 업데이트)">📅 Holiday</button>
+            </div>
+        </div>
+
+        <div class="header-center">
+            <div class="snapshot-timer-container">
+                <span class="status-indicator live" id="live-indicator"></span>
+                <span class="snapshot-label">Snapshot:</span>
+                <strong id="snapshot-timestamp" class="timestamp-value">--:--:--</strong>
+                <span class="staleness-badge fresh" id="staleness-badge">● LIVE (0s)</span>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <div class="shortcut-hints">
+                <span class="kbd-badge"><kbd>F5</kbd> Reload</span>
+                <span class="kbd-badge"><kbd>Enter</kbd> Price</span>
+                <span class="kbd-badge highlight"><kbd>F9</kbd> Reload & Price</span>
+            </div>
+            <div class="clock-display" id="system-clock">15:00:00</div>
+        </div>
+    </header>
+
+    <!-- Main Terminal Content Grid -->
+    <main class="terminal-grid">
+
+        <!-- Column 1: Live Market Board & Curve Chart -->
+        <section class="panel panel-market">
+            <div class="panel-header">
+                <div class="panel-title">
+                    <span class="icon">📊</span>
+                    <h2 id="market-panel-title">Tradeweb USD SOFR OIS Quotes</h2>
+                </div>
+                <div class="panel-actions">
+                    <button class="btn-sm-outline" id="btn-reset-quotes" title="Reset all quotes to default baseline">Reset Base</button>
+                    <button class="btn-icon-refresh" id="btn-reload-feed" title="Reload Live LSEG Market Feed">⟳</button>
+                </div>
+            </div>
+
+            <!-- Quick Market Indicator Pill Strip -->
+            <div class="quick-stats-strip">
+                <div class="stat-pill">
+                    <span class="stat-lbl" id="lbl-fix-rate">SOFR Fix (ON)</span>
+                    <strong class="stat-val stat-fix" id="ois-fix-rate">3.6500%</strong>
+                </div>
+                <div class="stat-pill">
+                    <span class="stat-lbl" id="lbl-1y-rate">1Y Swap</span>
+                    <strong class="stat-val" id="ois-1y-rate">4.0150%</strong>
+                </div>
+                <div class="stat-pill">
+                    <span class="stat-lbl" id="lbl-3y-rate">3Y Swap</span>
+                    <strong class="stat-val" id="ois-3y-rate">4.0950%</strong>
+                </div>
+                <div class="stat-pill">
+                    <span class="stat-lbl" id="lbl-5y-rate">5Y Swap</span>
+                    <strong class="stat-val" id="ois-5y-rate">4.1360%</strong>
+                </div>
+            </div>
+
+            <!-- Interactive Curve Chart Preview -->
+            <div class="curve-chart-card">
+                <div class="chart-header">
+                    <span class="chart-title">Term Structure (Par vs Zero Curve)</span>
+                    <div class="chart-legend">
+                        <span class="leg-item"><span class="dot par"></span>Par Rate</span>
+                        <span class="leg-item"><span class="dot zero"></span>Zero Rate</span>
+                    </div>
+                </div>
+                <canvas id="curveCanvas" width="480" height="140"></canvas>
+            </div>
+
+            <!-- Market Quotes Table (Interactive Editable) -->
+            <div class="table-wrapper quote-table-wrapper">
+                <div class="table-sub-header">
+                    <span>Click any rate to edit quote manually</span>
+                </div>
+                <table class="data-table quote-table" id="quote-table">
+                    <thead>
+                        <tr>
+                            <th>Tenor</th>
+                            <th>RIC</th>
+                            <th class="num">Bid</th>
+                            <th class="num">Ask</th>
+                            <th class="num">Mid (%)</th>
+                            <th class="num">Chg(bp)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="quote-table-body">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Column 2: Trade Builder & On-Demand Action Control -->
+        <section class="panel panel-trade">
+            <div class="panel-header">
+                <div class="panel-title">
+                    <span class="icon">📝</span>
+                    <h2 id="trade-panel-title">USD IRS Trade Specifications</h2>
+                </div>
+                <span class="badge-tag" id="trade-badge-tag">USD / SOFR Compound</span>
+            </div>
+
+            <!-- Termsheet upload: identity is stripped server-side and nothing is stored -->
+            <div class="termsheet-zone" id="termsheet-zone">
+                <div class="ts-idle" id="ts-idle">
+                    <span class="ts-icon">TS</span>
+                    <div class="ts-copy">
+                        <strong>Term Sheet Upload</strong>
+                        <span>PDF를 끌어다 놓거나 클릭해 선택 · 거래상대 정보는 제거 후 분석하며 원본은 저장하지 않습니다</span>
+                    </div>
+                    <input type="file" id="ts-file-input" accept="application/pdf,.pdf" hidden>
+                </div>
+
+                <div class="ts-busy" id="ts-busy" hidden>
+                    <span class="ts-spinner"></span>
+                    <span id="ts-busy-text">Term Sheet 분석 중…</span>
+                    <button type="button" class="ts-btn-ghost" id="ts-cancel">취소</button>
+                </div>
+
+                <div class="ts-review" id="ts-review" hidden>
+                    <div class="ts-review-head">
+                        <strong id="ts-review-title">추출된 거래조건 검토</strong>
+                        <span class="ts-redaction" id="ts-redaction"></span>
+                    </div>
+                    <div class="ts-warnings" id="ts-warnings" hidden></div>
+                    <div class="ts-fields" id="ts-fields"></div>
+                    <div class="ts-questions" id="ts-questions" hidden></div>
+                    <div class="ts-actions">
+                        <button type="button" class="ts-btn-confirm" id="ts-confirm" disabled>
+                            검토 완료 · F9 프라이싱 활성화
+                        </button>
+                        <button type="button" class="ts-btn-ghost" id="ts-discard">폐기</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Multi-Quote Ticket Workspace Bar (Dynamic Sub-tabs per Product) -->
+            <div class="quote-tickets-workspace-bar" id="quote-tickets-workspace-bar">
+                <div class="tickets-scroll-container" id="tickets-scroll-container">
+                    <!-- Populated dynamically by JS -->
+                </div>
+                <div class="tickets-bar-actions">
+                    <button type="button" class="btn-new-ticket" id="btn-new-ticket" title="Create New Quote Ticket (새 호가 티켓 생성)">
+                        <span class="plus-icon">+</span> New Quote
+                    </button>
+                </div>
+            </div>
+
+            <!-- Ticket Metadata & Action Toolbar -->
+            <div class="ticket-meta-toolbar" id="ticket-meta-toolbar">
+                <div class="ticket-meta-inputs">
+                    <div class="meta-field client-field">
+                        <span class="meta-icon">🏢</span>
+                        <input type="text" id="ticket-client-input" class="meta-input" placeholder="Client Name (e.g. 현대캐피탈)" title="고객사명 / 마케터명">
+                    </div>
+                    <div class="meta-field alias-field">
+                        <span class="meta-icon">🏷️</span>
+                        <input type="text" id="ticket-alias-input" class="meta-input" placeholder="Quote Alias (e.g. 3Y Pay Fixed)" title="호가 탭 제목">
+                    </div>
+                </div>
+                <div class="ticket-meta-actions">
+                    <button type="button" class="btn-ticket-action btn-duplicate-ticket" id="btn-duplicate-ticket" title="Duplicate this ticket (동일 조건 복제)">
+                        <span class="btn-icon">⧉</span> Duplicate
+                    </button>
+                    <button type="button" class="btn-ticket-action btn-copy-quote" id="btn-copy-quote-top" title="Copy quote summary to clipboard for Messenger / Teams / Bloomberg">
+                        <span class="btn-icon">📋</span> Copy Quote
+                    </button>
+                </div>
+            </div>
+
+            <form id="trade-form" class="trade-form" onsubmit="event.preventDefault();">
+                <!-- SWAP TRADE CONTAINER (USD SOFR / KRW CD / KRW KOFR / KRW CRS) -->
+                <div id="swap-trade-container" class="swap-trade-wrapper">
+                    <!-- Position / Direction Leg Switcher -->
+                    <div class="position-phase-bar">
+                    <button type="button" class="phase-btn active" id="btn-phase-pay" data-position="Pay Fixed">
+                        <span class="phase-badge pay">LEG 1</span>
+                        <div class="phase-info">
+                            <strong class="phase-title" id="phase-title-pay">Pay Fixed (Rec Float)</strong>
+                            <span class="phase-desc" id="phase-desc-pay">Pay Fixed Coupon ➔ Receive Floating Index</span>
+                        </div>
+                    </button>
+                    <button type="button" class="phase-btn" id="btn-phase-rec" data-position="Rec Fixed">
+                        <span class="phase-badge rec">LEG 2</span>
+                        <div class="phase-info">
+                            <strong class="phase-title" id="phase-title-rec">Receive Fixed (Pay Float)</strong>
+                            <span class="phase-desc" id="phase-desc-rec">Receive Fixed Coupon ➔ Pay Floating Index</span>
+                        </div>
+                    </button>
+                    <select id="position" name="position" style="display:none;">
+                        <option value="Pay Fixed" selected>Pay Fixed</option>
+                        <option value="Rec Fixed">Rec Fixed</option>
+                    </select>
+                </div>
+
+                <!-- Common Deal Terms Card -->
+                <div class="common-terms-card">
+                    <!-- Curve Model Selector Row (USD SOFR only & CRS USD OIS) -->
+                    <div class="curve-model-selector-row" id="group-curve-model" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding: 6px 10px; background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 6px;">
+                        <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #1e293b;">
+                            <span>📐</span>
+                            <span id="lbl-curve-model">USD SOFR Curve Model:</span>
+                        </div>
+                        <div class="segmented-control" style="display: flex; gap: 4px;">
+                            <button type="button" class="btn-curve-toggle active" data-curve="Standard" id="btn-curve-standard" style="padding: 3px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; border: 1px solid #94a3b8; background: #2563eb; color: #fff; cursor: pointer;">Standard (Linear ZC)</button>
+                            <button type="button" class="btn-curve-toggle" data-curve="Advanced" id="btn-curve-advanced" style="padding: 3px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; border: 1px solid #cbd5e1; background: #f1f5f9; color: #475569; cursor: pointer;">Advanced (Hybrid Spline)</button>
+                        </div>
+                    </div>
+
+                    <!-- CRS Swap Structure Row (KRW_CRS only) -->
+                    <div class="crs-swap-type-row" id="group-crs-swap-type" style="display: none; align-items: center; justify-content: space-between; margin-bottom: 10px; padding: 6px 10px; background: #eff6ff; border: 1.5px solid #93c5fd; border-radius: 6px;">
+                        <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #1e40af;">
+                            <span>🔄</span>
+                            <span>CRS Swap Structure:</span>
+                        </div>
+                        <div class="segmented-control" style="display: flex; gap: 4px;">
+                            <button type="button" class="btn-crs-type-toggle active" data-swap-type="Vanilla" id="btn-crs-vanilla" style="padding: 3px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; border: 1px solid #3b82f6; background: #2563eb; color: #fff; cursor: pointer;">Vanilla (KRW Fix vs USD Flt)</button>
+                            <button type="button" class="btn-crs-type-toggle" data-swap-type="Fixed-Fixed" id="btn-crs-fixed-fixed" style="padding: 3px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; border: 1px solid #bfdbfe; background: #dbeafe; color: #1e40af; cursor: pointer;">Fixed-to-Fixed (KRW Fix vs USD Fix)</button>
+                        </div>
+                    </div>
+
+                    <!-- Notional, Capital FX & Versus Notional (Single unified row) -->
+                    <div class="form-row" id="row-notionals-container">
+                        <div class="form-group flex-1">
+                            <label for="notional-display" id="lbl-notional">Notional (USD)</label>
+                            <div class="input-with-affix">
+                                <span class="affix" id="notional-affix">$</span>
+                                <input type="text" id="notional-display" name="notional_display" value="100,000,000" placeholder="100,000,000" required>
+                            </div>
+                        </div>
+                        <div class="form-group flex-1" id="group-capital-fx" style="display:none;">
+                            <label for="capital-fx-rate" id="lbl-capital-fx">Capital FX Rate</label>
+                            <div class="input-with-affix">
+                                <input type="text" id="capital-fx-rate" name="capital_fx_rate" value="1,373.50" placeholder="1,373.50" required>
+                                <span class="affix">KRW</span>
+                            </div>
+                        </div>
+                        <div class="form-group flex-1" id="row-krw-notional" style="display:none;">
+                            <label for="krw-notional-display">Versus Notional (KRW)</label>
+                            <div class="input-with-affix">
+                                <span class="affix">₩</span>
+                                <input type="text" id="krw-notional-display" value="137,575,000,000" placeholder="137,575,000,000">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tenor Selector: Quick Chips + Odd Tenor Custom Input -->
+                    <div class="form-group">
+                        <div class="label-with-action">
+                            <label>Tenor Selection</label>
+                            <span class="sub-hint">Standard or Odd Tenors (e.g. 14M, 18M, 2.5Y, 3Y, 5Y)</span>
+                        </div>
+                        <div class="tenor-chips" id="tenor-chips">
+                            <button type="button" class="chip" data-tenor="1Y">1Y</button>
+                            <button type="button" class="chip" data-tenor="2Y">2Y</button>
+                            <button type="button" class="chip" data-tenor="3Y">3Y</button>
+                            <button type="button" class="chip active" data-tenor="5Y">5Y</button>
+                            <button type="button" class="chip" data-tenor="7Y">7Y</button>
+                            <button type="button" class="chip" data-tenor="10Y">10Y</button>
+                            <button type="button" class="chip" data-tenor="15Y">15Y</button>
+                            <button type="button" class="chip" data-tenor="20Y">20Y</button>
+                            <button type="button" class="chip" data-tenor="30Y">30Y</button>
+                            <button type="button" class="chip chip-custom" id="chip-odd" data-tenor="custom">Odd Tenor</button>
+                        </div>
+                    </div>
+
+                    <!-- Odd Tenor Custom Input Row -->
+                    <div class="odd-tenor-row" id="odd-tenor-container">
+                        <div class="form-group flex-1">
+                            <label for="custom-tenor-input">Odd Tenor Input</label>
+                            <div class="input-with-affix">
+                                <input type="text" id="custom-tenor-input" placeholder="e.g. 14M, 18M, 20M, 2.5Y, 3Y6M" value="5Y">
+                                <button type="button" class="btn-inline" id="btn-apply-odd-tenor">Apply</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dates Details (Effective & Maturity Date) -->
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label for="effective-date" id="lbl-effective-date">Effective Date (Spot T+2)</label>
+                            <input type="date" id="effective-date" name="effective_date" class="date-input">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label for="maturity-date">Maturity Date</label>
+                            <input type="date" id="maturity-date" name="maturity_date" class="date-input">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dual-Leg Parameter Cards -->
+                <div class="dual-phase-grid-header">
+                    <div class="dual-phase-header-left" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <span class="dual-phase-title">⚙️ Leg Specifications & Market Conventions (Symmetric Dual Leg)</span>
+                        <div class="segmented-control leg-structure-control" id="ctrl-leg-structure" style="display: inline-flex; gap: 4px; background: #f1f5f9; padding: 2px 4px; border-radius: 6px; border: 1px solid #cbd5e1;">
+                            <button type="button" class="btn-leg-struct-toggle active" data-structure="Vanilla" id="btn-struct-vanilla" style="padding: 2px 9px; font-size: 11px; font-weight: 700; border-radius: 4px; border: 1px solid #2563eb; background: #2563eb; color: #fff; cursor: pointer;">Vanilla (Fix vs Float)</button>
+                            <button type="button" class="btn-leg-struct-toggle" data-structure="Fixed-Fixed" id="btn-struct-fixed-fixed" style="padding: 2px 9px; font-size: 11px; font-weight: 700; border-radius: 4px; border: 1px solid #cbd5e1; background: #ffffff; color: #475569; cursor: pointer;">Fixed - Fixed</button>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-reset-params" id="btn-reset-params" title="Reset parameters to currency default">↺ Reset Defaults</button>
+                </div>
+
+                <div class="dual-phase-container">
+                        <!-- Leg 1 Card (Fixed Leg / KRW Leg) -->
+                        <div class="phase-card fixed-phase" id="phase-card-fixed">
+                            <div class="phase-card-header">
+                                <span class="phase-tag tag-fixed" id="tag-fixed-leg">● Leg 1 (Fixed / KRW)</span>
+                                <span class="phase-tag-sub" id="tag-fixed-sub">Coupon & Schedule</span>
+                            </div>
+                            <div class="phase-card-body">
+                                <div class="form-group">
+                                    <label for="fixed-coupon" id="lbl-fixed-coupon">Fixed Coupon (%)</label>
+                                    <div class="input-with-affix">
+                                        <input type="number" id="fixed-coupon" name="fixed_coupon" value="4.0610" step="0.0001" required>
+                                        <span class="affix">%</span>
+                                    </div>
+                                </div>
+                                <div class="param-row-2">
+                                    <div class="param-group">
+                                        <label for="param-day-count">Day Count</label>
+                                        <select id="param-day-count" class="param-select">
+                                            <option value="Act/360" selected>Act/360</option>
+                                            <option value="Act/365">Act/365</option>
+                                            <option value="30/360">30/360</option>
+                                            <option value="Act/Act">Act/Act</option>
+                                        </select>
+                                    </div>
+                                    <div class="param-group">
+                                        <label for="param-payment-freq">Pay Freq</label>
+                                        <select id="param-payment-freq" class="param-select">
+                                            <option value="1M">1M</option>
+                                            <option value="3M">3M</option>
+                                            <option value="6M">6M</option>
+                                            <option value="12M" selected>12M</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="param-row-2">
+                                    <div class="param-group">
+                                        <label for="param-convention">Convention</label>
+                                        <select id="param-convention" class="param-select">
+                                            <option value="Modified Following" selected>Mod Following</option>
+                                            <option value="Following">Following</option>
+                                            <option value="Preceding">Preceding</option>
+                                        </select>
+                                    </div>
+                                    <div class="param-group">
+                                        <label for="param-stub">Stub Rule</label>
+                                        <select id="param-stub" class="param-select">
+                                            <option value="Short in arrears" selected>Short in arrears</option>
+                                            <option value="Short upfront">Short upfront</option>
+                                            <option value="Long in arrears">Long in arrears</option>
+                                            <option value="Long upfront">Long upfront</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="param-row-2">
+                                    <div class="param-group">
+                                        <label for="param-adjust">Adjust</label>
+                                        <select id="param-adjust" class="param-select">
+                                            <option value="Adjust" selected>Adjust</option>
+                                            <option value="Unadjust">Unadjust</option>
+                                        </select>
+                                    </div>
+                                    <div class="param-group">
+                                        <label for="param-pay-cal">Calendar</label>
+                                        <select id="param-pay-cal" class="param-select">
+                                            <option value="NYB">NYB</option>
+                                            <option value="SEB" selected>SEB</option>
+                                            <option value="SEB_NYB">SEB_NYB</option>
+                                            <option value="LNB">LNB</option>
+                                            <option value="TKB">TKB</option>
+                                            <option value="TGT">TGT</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Leg 2 Card (Float Leg / USD Leg) -->
+                        <div class="phase-card float-phase" id="phase-card-float">
+                            <div class="phase-card-header">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span class="phase-tag tag-float" id="tag-float-leg">● Leg 2 (Floating / USD)</span>
+                                    <div class="mini-leg-type-toggle" id="mini-leg2-type-toggle" style="display: inline-flex; border: 1px solid #cbd5e1; border-radius: 4px; overflow: hidden; background: #fff;">
+                                        <button type="button" id="btn-leg2-type-float" class="mini-type-btn active" style="padding: 1px 7px; font-size: 10px; font-weight: 700; border: none; background: #2563eb; color: #fff; cursor: pointer;">Float</button>
+                                        <button type="button" id="btn-leg2-type-fixed" class="mini-type-btn" style="padding: 1px 7px; font-size: 10px; font-weight: 700; border: none; background: #f1f5f9; color: #64748b; cursor: pointer;">Fixed</button>
+                                    </div>
+                                </div>
+                                <span class="phase-tag-sub" id="tag-float-sub">Index & Fixing</span>
+                            </div>
+                            <div class="phase-card-body">
+                                <div class="form-group" id="group-float-spread">
+                                    <label for="spread-bp" id="lbl-floating-spread">Spread (bp)</label>
+                                    <div class="input-with-affix">
+                                        <input type="number" id="spread-bp" name="floating_spread" value="0.0" step="0.01">
+                                        <span class="affix">bp</span>
+                                    </div>
+                                </div>
+                                <div class="form-group" id="group-usd-fixed-coupon" style="display: none;">
+                                    <label for="usd-fixed-coupon" id="lbl-leg2-fixed-coupon">Fixed Coupon (%)</label>
+                                    <div class="input-with-affix">
+                                        <input type="number" id="usd-fixed-coupon" value="3.50" step="0.0001">
+                                        <span class="affix">%</span>
+                                    </div>
+                                </div>
+                                <div class="param-row-2">
+                                    <div class="param-group">
+                                        <label for="leg2-day-count">Day Count</label>
+                                        <select id="leg2-day-count" class="param-select">
+                                            <option value="Act/360" selected>Act/360</option>
+                                            <option value="Act/365">Act/365</option>
+                                            <option value="30/360">30/360</option>
+                                            <option value="Act/Act">Act/Act</option>
+                                        </select>
+                                    </div>
+                                    <div class="param-group">
+                                        <label for="leg2-payment-freq">Pay Freq</label>
+                                        <select id="leg2-payment-freq" class="param-select">
+                                            <option value="1M">1M</option>
+                                            <option value="3M">3M</option>
+                                            <option value="6M">6M</option>
+                                            <option value="12M" selected>12M</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="param-row-2">
+                                    <div class="param-group">
+                                        <label for="leg2-convention">Convention</label>
+                                        <select id="leg2-convention" class="param-select">
+                                            <option value="Modified Following" selected>Mod Following</option>
+                                            <option value="Following">Following</option>
+                                            <option value="Preceding">Preceding</option>
+                                        </select>
+                                    </div>
+                                    <div class="param-group">
+                                        <label for="leg2-stub">Stub Rule</label>
+                                        <select id="leg2-stub" class="param-select">
+                                            <option value="Short in arrears" selected>Short in arrears</option>
+                                            <option value="Short upfront">Short upfront</option>
+                                            <option value="Long in arrears">Long in arrears</option>
+                                            <option value="Long upfront">Long upfront</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="param-row-2">
+                                    <div class="param-group">
+                                        <label for="leg2-adjust">Adjust</label>
+                                        <select id="leg2-adjust" class="param-select">
+                                            <option value="Adjust" selected>Adjust</option>
+                                            <option value="Unadjust">Unadjust</option>
+                                        </select>
+                                    </div>
+                                    <div class="param-group">
+                                        <label for="leg2-cal">Calendar</label>
+                                        <select id="leg2-cal" class="param-select">
+                                            <option value="NYB" selected>NYB</option>
+                                            <option value="SEB">SEB</option>
+                                            <option value="SEB_NYB">SEB_NYB</option>
+                                            <option value="LNB">LNB</option>
+                                            <option value="TKB">TKB</option>
+                                            <option value="TGT">TGT</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <!-- Float specific fixing controls -->
+                                <div class="param-row-2" id="row-leg2-fixing-details">
+                                    <div class="param-group">
+                                        <label for="param-fix-cal">FixCal</label>
+                                        <select id="param-fix-cal" class="param-select">
+                                            <option value="NYB" selected>NYB</option>
+                                            <option value="SEB">SEB</option>
+                                            <option value="LNB">LNB</option>
+                                            <option value="TKB">TKB</option>
+                                            <option value="SEB_NYB">SEB_NYB</option>
+                                            <option value="TGT">TGT</option>
+                                            <option value="NONE">NONE</option>
+                                        </select>
+                                    </div>
+                                    <div class="param-group">
+                                        <label for="param-fix-day">FixDay</label>
+                                        <input type="number" id="param-fix-day" class="param-input" value="-2" step="1">
+                                    </div>
+                                </div>
+                            </div>
+                    </div>
+                </div>
+
+                <!-- 3-Step Controlled Action Panel -->
+                <div class="action-panel" id="swap-action-panel">
+                    <div class="action-btn-group">
+                        <button type="button" class="btn btn-secondary" id="btn-reload-market" title="Shortcut: F5">
+                            <span class="btn-icon">⟳</span>
+                            <span class="btn-main-text">1. Reload Market</span>
+                            <span class="btn-sub-text">[ F5 ]</span>
+                        </button>
+                        <button type="button" class="btn btn-primary" id="btn-calc-price" title="Shortcut: Enter">
+                            <span class="btn-icon">▶</span>
+                            <span class="btn-main-text">2. Calculate Pricing</span>
+                            <span class="btn-sub-text">[ Enter ]</span>
+                        </button>
+                    </div>
+
+                    <button type="button" class="btn btn-oneshot" id="btn-oneshot" title="Shortcut: F9">
+                        <span class="btn-icon">⚡</span>
+                        <span class="btn-main-text">Reload & Price (One-Shot)</span>
+                        <span class="btn-sub-text">[ F9 ]</span>
+                    </button>
+                </div>
+            </div> <!-- Close #swap-trade-container -->
+
+            <!-- FORWARD SWAP POINT / FX FORWARD MODE CONTAINER -->
+            <div id="fwd-trade-container" style="display:none;" class="fwd-trade-wrapper">
+                <!-- Forward Deal Specifications Card -->
+                <div class="common-terms-card" style="padding:10px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #e2e8f0; padding-bottom:6px;">
+                        <span style="font-weight:800; font-size:11.5px; color:#1e293b; display:flex; align-items:center; gap:6px;">
+                            <span style="font-size:13px;">📌</span> USD/KRW Forward Specifications
+                        </span>
+                        <span class="badge-pill" style="background:#e0f2fe; color:#0369a1; font-weight:700; font-size:10px;">SEB_NYB Joint Cal</span>
+                    </div>
+                    <div class="form-row" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px;">
+                        <div class="form-group">
+                            <label for="fwd-spot-fx">Spot FX (KRW/USD)</label>
+                            <div class="input-with-affix">
+                                <input type="text" id="fwd-spot-fx" value="1,366.29" style="font-weight:700; color:#0284c7;">
+                                <span class="affix">KRW</span>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="fwd-default-margin">Default Margin (bp)</label>
+                            <div class="input-with-affix">
+                                <input type="number" id="fwd-default-margin" value="1.0" step="0.1" style="font-weight:700;">
+                                <span class="affix">bp</span>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="fwd-spot-date">Spot Date (Near T+2)</label>
+                            <input type="text" id="fwd-spot-date" class="date-input" readonly value="2026-09-04" style="background:#edf2f7; font-weight:600;">
+                        </div>
+                    </div>
+                    <div style="margin-top:8px; padding-top:6px; border-top:1px solid #e2e8f0; font-size:10.5px; color:#475569; display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                        <span><strong>Pair:</strong> USDKRW</span>
+                        <span><strong>DF USD (Spot):</strong> <span id="fwd-spec-df-usd" style="color:#0369a1; font-family:'Roboto Mono',monospace; font-weight:700;">1.000000</span></span>
+                        <span><strong>DF CRS (Spot):</strong> <span id="fwd-spec-df-krw" style="color:#d97706; font-family:'Roboto Mono',monospace; font-weight:700;">1.000000</span></span>
+                        <span style="background:#f1f5f9; padding:2px 6px; border-radius:4px; font-size:9.5px; color:#334155; font-family:'Roboto Mono',monospace;">CIP: SP = (DF_USD(T)/DF_USD(Spot) &times; DF_CRS(Spot)/DF_CRS(T) - 1) &times; Spot_FX</span>
+                    </div>
+                </div>
+
+                <!-- Trader Excel Quick Paste Section -->
+                <div class="fwd-paste-card" style="margin-top:8px; padding:10px 12px; background:#f0fdf4; border:1.5px solid #86efac; border-radius:8px;">
+                    <div class="paste-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <div class="paste-title-wrap" style="display:flex; align-items:center; gap:6px; font-weight:700; color:#15803d; font-size:12px;">
+                            <span class="icon">📋</span>
+                            <span>Paste Excel Far Legs [Maturity, Notional]</span>
+                        </div>
+                        <div class="paste-actions" style="display:flex; gap:4px;">
+                            <button type="button" class="btn-xs-connect" id="btn-fwd-sample" style="padding:2px 8px; font-size:11px; cursor:pointer;">Sample Data</button>
+                            <button type="button" class="btn-xs-connect" id="btn-fwd-clear" style="padding:2px 8px; font-size:11px; cursor:pointer;">Clear</button>
+                        </div>
+                    </div>
+                    <textarea id="fwd-paste-textarea" rows="4" style="width:100%; box-sizing:border-box; font-family:'Roboto Mono',monospace; font-size:12px; padding:8px; border:1px solid #bbf7d0; border-radius:4px; resize:vertical;" placeholder="엑셀에서 복사한 [만기일(YYYY-MM-DD)    Notional(USD)] 붙여넣기 (Ctrl+V)&#10;예:&#10;2026-11-30    1,648,000&#10;2027-02-26    1,676,000&#10;2027-05-28    3,353,000"></textarea>
+                    <div class="paste-hint-row" style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:11px; color:#4b5563;">
+                        <span>* 엑셀에서 만기/금액 복사 후 붙여넣고 [Apply Paste] 또는 Enter 클릭</span>
+                        <button type="button" class="btn-apply-paste" id="btn-fwd-apply-paste" style="padding:4px 12px; background:#16a34a; color:#fff; font-weight:700; border:none; border-radius:4px; cursor:pointer;">Apply Paste</button>
+                    </div>
+                </div>
+
+                <!-- FWD Action Buttons -->
+                <div class="action-panel" style="margin-top: 8px;">
+                    <div class="action-btn-group">
+                        <button type="button" class="btn btn-secondary" id="btn-fwd-reload" title="Shortcut: F5">
+                            <span class="btn-icon">⟳</span>
+                            <span class="btn-main-text">1. Reload Curves</span>
+                            <span class="btn-sub-text">[ F5 ]</span>
+                        </button>
+                        <button type="button" class="btn btn-primary" id="btn-fwd-calc" title="Shortcut: Enter">
+                            <span class="btn-icon">▶</span>
+                            <span class="btn-main-text">2. Calculate FWD</span>
+                            <span class="btn-sub-text">[ Enter ]</span>
+                        </button>
+                    </div>
+
+                    <button type="button" class="btn btn-oneshot" id="btn-fwd-oneshot" title="Shortcut: F9">
+                        <span class="btn-icon">⚡</span>
+                        <span class="btn-main-text">Reload & Price (One-Shot)</span>
+                        <span class="btn-sub-text">[ F9 ]</span>
+                    </button>
+                </div>
+            </div> <!-- Close #fwd-trade-container -->
+        </form>
+    </section>
+
+    <!-- Column 3: Pricing Results & Risk Matrix -->
+    <section class="panel panel-results">
+        <div class="panel-header">
+            <div class="panel-title">
+                <span class="icon">🎯</span>
+                <h2 id="results-panel-title">Pricing Results & Risk</h2>
+                <span class="curve-model-badge" id="curve-model-badge" title="Curve model that produced these numbers">Standard</span>
+            </div>
+            <div class="calc-status-badge" id="calc-status">Ready</div>
+        </div>
+
+        <!-- Stale market data warning: the numbers below were priced on an old snapshot -->
+        <div class="stale-banner" id="results-stale-banner" style="display:none;">
+            <span class="stale-banner-icon">⚠</span>
+            <span id="results-stale-text">Priced on stale market data — press F9 to reload and re-price.</span>
+        </div>
+
+        <!-- SWAP MODE RESULTS -->
+        <div id="swap-results-container">
+            <!-- Primary Metric Cards -->
+            <div class="result-hero-cards">
+                <div class="hero-card hero-par">
+                    <div class="hero-label" id="lbl-hero-par">Par Swap Rate (Equilibrium)</div>
+                    <div class="hero-val" id="res-par-rate">4.0610 <span class="unit">%</span></div>
+                    <div class="hero-sub" id="res-spread-vs-cpn">Spread vs Cpn: +0.00 bp</div>
+                    <div class="hero-sub" id="res-par-secondary" style="display:none; font-weight:700; color:#0284c7; margin-top:2px;"></div>
+                </div>
+
+                <div class="hero-card hero-npv">
+                    <div class="hero-label">Deal Net Present Value (NPV)</div>
+                    <div class="hero-val" id="res-deal-npv">$ 0.00</div>
+                    <div class="hero-sub" id="res-pv-breakdown">Leg1 Fixed PV: $0 | Leg2 Float PV: $0</div>
+                </div>
+
+                <div class="hero-card hero-dv01">
+                    <div class="hero-label">PV01 / DV01 (1bp Sensitivity)</div>
+                    <div class="hero-val" id="res-dv01">$ 45,051 <span class="unit">/ bp</span></div>
+                    <div class="hero-sub" id="res-annuity">Annuity: 4.505100</div>
+                </div>
+            </div>
+
+            <!-- Key Rate Delta Bucketing (Bar Chart + Table) -->
+            <div class="risk-section">
+                <div class="section-title">
+                    <span id="lbl-delta-section-title">Key Rate Delta Bucketing (1bp Shift Sensitivity)</span>
+                </div>
+                <div class="delta-bars-container" id="delta-bars">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Hedge Curve Delta Bucketing (Comparison for Advanced Mode) -->
+            <div class="risk-section" id="hedge-delta-section" style="display: none; margin-top: 14px; padding-top: 12px; border-top: 1.5px dashed #cbd5e1;">
+                <div class="section-title" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <span style="display: flex; align-items: center; gap: 6px; font-weight: 700; color: #0f172a;">
+                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #059669;"></span>
+                        <span id="lbl-hedge-delta-title">Hedge Curve Delta Bucketing</span>
+                        <span style="font-size: 10px; font-weight: normal; color: #475569; background: #f1f5f9; padding: 1px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">Linear ZC Basis</span>
+                    </span>
+                    <span style="font-size: 10px; font-weight: 700; background: #ecfdf5; color: #047857; padding: 2px 6px; border-radius: 4px; border: 1px solid #a7f3d0;">Strict 0 Beyond Maturity</span>
+                </div>
+                <div class="delta-bars-container" id="hedge-delta-bars">
+                    <!-- Populated by JS with Hedge Curve deltas -->
+                </div>
+            </div>
+
+            <!-- Quick Copy for Messenger button (Swap Mode) -->
+            <div class="copy-quote-results-wrapper" style="padding: 10px 12px 14px 12px;">
+                <button type="button" class="btn-copy-messenger" id="btn-swap-copy-messenger" style="width:100%;padding:10px 14px;background:#f0fdf4;border:1.5px solid #86efac;color:#15803d;font-weight:800;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-size:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06);transition:all 0.15s ease;white-space:nowrap;">
+                    <span style="font-size:14px;">📋</span> Copy Quote for Messenger
+                </button>
+            </div>
+        </div>
+
+        <!-- FORWARD SWAP POINT MODE RESULTS -->
+        <div id="fwd-results-container" style="display:none;">
+            <div class="result-hero-cards">
+                <div class="hero-card hero-par">
+                    <div class="hero-label">Weighted Avg Swap Point (Quoted)</div>
+                    <div class="hero-val" id="fwd-res-wavg-sp">-7.41 <span class="unit">원</span></div>
+                    <div class="hero-sub" id="fwd-res-wavg-sub">Theo SP: -7.33 | Margin: -0.08 원</div>
+                </div>
+
+                <div class="hero-card hero-npv">
+                    <div class="hero-label">Total USD Notional & FX Delta</div>
+                    <div class="hero-val" id="fwd-res-total-notional">$ 10,148,000</div>
+                    <div class="hero-sub" id="fwd-res-delta-sub">FX Delta: $ 7,257.72 | Spot Hedge: -₩ 9.92M</div>
+                </div>
+
+                <div class="hero-card hero-dv01">
+                    <div class="hero-label">Total Sales Margin (KRW)</div>
+                    <div class="hero-val" id="fwd-res-total-margin">₩ 774,394</div>
+                    <div class="hero-sub" id="fwd-res-margin-sub">Default Margin: 1.0 bp</div>
+                </div>
+            </div>
+
+            <!-- Quick Copy for Messenger button -->
+            <div style="padding: 10px 12px;">
+                <button type="button" class="btn-copy-messenger" id="btn-fwd-copy-messenger" style="width:100%;padding:10px 14px;background:#dcfce7;border:1.5px solid #86efac;color:#15803d;font-weight:800;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-size:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06);transition:all 0.15s ease;white-space:nowrap;">
+                    <span style="font-size:14px;">📋</span> Copy Quote for Messenger
+                </button>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+    <!-- Full-Width Marketer Excel Schedule Section (Matches Swap Cash Flow Schedule Width) -->
+    <section class="panel panel-paste-schedule" id="rc-paste-card">
+        <div class="waterfall-header paste-schedule-header" id="paste-schedule-toggle">
+            <div class="header-left">
+                <span class="collapse-icon" id="paste-collapse-icon">▼</span>
+                <h3 id="paste-schedule-title-text">Paste Excel Schedule <span class="hint-inline">Start date · End date · Pay date · Nominal · Fixing date</span></h3>
+                <span class="badge-pill" id="rc-period-count-pill" style="display:none; background:#e0f2fe; color:#0369a1; font-weight:700;"><span id="rc-period-count">0</span> Periods</span>
+                <span class="schedule-mode-badge" id="rc-status-badge" style="display:none; background:#dcfce7; color:#15803d; border:1px solid #86efac; font-weight:800; font-size:11px; padding:2px 8px; border-radius:4px;">● Custom Schedule Active</span>
+            </div>
+
+            <div class="schedule-toolbar" onclick="event.stopPropagation();">
+                <button type="button" class="btn-tb" id="btn-rc-sample" style="background:#2563eb; color:#fff; font-weight:700;" title="보내주신 마케터 캡처 데이터 12회차(22억 원)를 Leg 1과 Leg 2에 즉시 로드">
+                    ⚡ Sample Data (Marketer)
+                </button>
+                <button type="button" class="btn-tb" id="btn-rc-download-template" style="background:#059669; color:#fff; font-weight:700;" title="5열(Start date, End date, Pay date, Nominal, Fixing date) 표준 엑셀 양식 다운로드">
+                    📥 엑셀 양식 다운로드
+                </button>
+                <button type="button" class="btn-tb" id="btn-rc-upload-btn" style="background:#4f46e5; color:#fff; font-weight:700;" title="엑셀 파일(.xlsx, .xls, .csv)을 업로드하여 스케줄에 즉시 적용">
+                    📤 엑셀 업로드
+                </button>
+                <input type="file" id="rc-excel-file-input" accept=".xlsx, .xls, .csv" style="display:none;" />
+                <button type="button" class="btn-tb" id="btn-rc-copy-l1-to-l2" style="background:#0284c7; color:#fff; font-weight:700;" title="Leg 1의 텍스트를 Leg 2로 즉시 복사">
+                    Copy Leg 1 ➔ Leg 2
+                </button>
+                <button type="button" class="btn-tb btn-tb-reset" id="btn-rc-clear" style="font-weight:600;" title="스케줄 초기화">
+                    Clear All
+                </button>
+                <button type="button" class="btn-tb" id="btn-rc-calc-now" style="background:#16a34a; color:#fff; font-weight:800;" title="스케줄 기반 즉시 프라이싱 계산">
+                    ▶ Calculate Pricing
+                </button>
+            </div>
+        </div>
+
+        <div class="waterfall-body" id="paste-schedule-content" style="padding:14px 20px; background:#f8fafc;">
+            <div id="rc-paste-grid-container" style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; width:100%;">
+                <!-- Leg 1 Schedule Input (Fixed / KRW) -->
+                <div style="background:#ffffff; padding:12px 16px; border:1.5px solid #bfdbfe; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.04); min-width:0;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-weight:800; font-size:13px; color:#1e40af; display:flex; align-items:center; gap:6px;">
+                            <span style="color:#2563eb; font-size:15px;">●</span> Leg 1 Schedule (Fixed / KRW)
+                        </span>
+                        <div style="display:flex; gap:6px; align-items:center;">
+                            <span id="rc-status-badge-leg1" style="font-size:11px; font-weight:700; color:#1d4ed8; background:#dbeafe; padding:2px 8px; border-radius:4px; display:none;">● Active (<span id="rc-period-count-leg1">0</span>)</span>
+                            <button type="button" id="btn-rc-clear-leg1" style="font-size:11px; padding:2px 8px; background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer;">Clear</button>
+                        </div>
+                    </div>
+                    <!-- Visual 5-Column Header Guide (Aligned with 16ch Tab Stops) -->
+                    <div style="display:grid; grid-template-columns: 16ch 16ch 16ch 16ch 1fr; background:#f1f5f9; border:1px solid #cbd5e1; border-bottom:none; border-radius:6px 6px 0 0; padding:7px 14px; font-size:12px; font-weight:700; color:#334155; font-family:'Roboto Mono', Consolas, monospace; text-align:left;">
+                        <span>Start date</span>
+                        <span>End date</span>
+                        <span>Pay date</span>
+                        <span>Nominal</span>
+                        <span style="color:#b45309; background:#fef3c7; border-radius:3px; padding:0 4px; display:inline-block; width:fit-content;">Fixing date</span>
+                    </div>
+                    <textarea id="rc-paste-input-leg1" rows="7" style="width:100%; font-family:'Roboto Mono', Consolas, monospace; font-size:12px; line-height:1.65; padding:10px 14px; tab-size:16; -moz-tab-size:16; border:1px solid #cbd5e1; border-radius:0 0 6px 6px; resize:vertical; box-sizing:border-box; white-space:pre !important; overflow-x:auto !important; word-break:normal !important; overflow-wrap:normal !important;" placeholder="Start date&#9;End date&#9;Pay date&#9;Nominal&#9;Fixing date&#10;2025-08-06&#9;2025-09-06&#9;2025-09-08&#9;2,200,000,000&#9;2025-08-05"></textarea>
+                </div>
+
+                <!-- Leg 2 Schedule Input (Floating / USD) -->
+                <div style="background:#ffffff; padding:12px 16px; border:1.5px solid #bfdbfe; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.04); min-width:0;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-weight:800; font-size:13px; color:#0369a1; display:flex; align-items:center; gap:6px;">
+                            <span style="color:#0284c7; font-size:15px;">●</span> Leg 2 Schedule (Floating / USD)
+                        </span>
+                        <div style="display:flex; gap:6px; align-items:center;">
+                            <span id="rc-status-badge-leg2" style="font-size:11px; font-weight:700; color:#0369a1; background:#e0f2fe; padding:2px 8px; border-radius:4px; display:none;">● Active (<span id="rc-period-count-leg2">0</span>)</span>
+                            <button type="button" id="btn-rc-clear-leg2" style="font-size:11px; padding:2px 8px; background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer;">Clear</button>
+                        </div>
+                    </div>
+                    <!-- Visual 5-Column Header Guide (Aligned with 16ch Tab Stops) -->
+                    <div style="display:grid; grid-template-columns: 16ch 16ch 16ch 16ch 1fr; background:#f1f5f9; border:1px solid #cbd5e1; border-bottom:none; border-radius:6px 6px 0 0; padding:7px 14px; font-size:12px; font-weight:700; color:#334155; font-family:'Roboto Mono', Consolas, monospace; text-align:left;">
+                        <span>Start date</span>
+                        <span>End date</span>
+                        <span>Pay date</span>
+                        <span>Nominal</span>
+                        <span style="color:#b45309; background:#fef3c7; border-radius:3px; padding:0 4px; display:inline-block; width:fit-content;">Fixing date</span>
+                    </div>
+                    <textarea id="rc-paste-input-leg2" rows="7" style="width:100%; font-family:'Roboto Mono', Consolas, monospace; font-size:12px; line-height:1.65; padding:10px 14px; tab-size:16; -moz-tab-size:16; border:1px solid #cbd5e1; border-radius:0 0 6px 6px; resize:vertical; box-sizing:border-box; white-space:pre !important; overflow-x:auto !important; word-break:normal !important; overflow-wrap:normal !important;" placeholder="Start date&#9;End date&#9;Pay date&#9;Nominal&#9;Fixing date&#10;2025-08-06&#9;2025-09-06&#9;2025-09-08&#9;2,200,000,000&#9;2025-08-05"></textarea>
+                </div>
+            </div>
+
+            <!-- Hidden legacy textarea reference for backward-compat -->
+            <textarea id="rc-paste-input" style="display:none;"></textarea>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; padding-top:8px; border-top:1px dashed #bfdbfe;">
+                <span style="font-size:11.5px; color:#475569;">* 마케터 양식(Start, End, Pay, Nominal, Fixing) 붙여넣기 후 <strong>[Calculate Pricing]</strong> 클릭 시 각 회차의 <strong>Discount Factor, Cash Flow, NPV 및 결정 금리(Par Rate)</strong>가 정밀 산출됩니다.</span>
+                <span id="rc-active-summary" style="font-size:12px; font-weight:700; color:#1d4ed8; display:none;">● Custom Schedule Active</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Bottom Section: Dual-Leg Schedule (Leg 1 Fixed vs Leg 2 Floating) -->
+    <section class="panel panel-waterfall">
+        <div class="waterfall-header" id="waterfall-toggle">
+            <div class="header-left">
+                <span class="collapse-icon" id="collapse-icon">▼</span>
+                <h3 id="schedule-title-text">Swap Cash Flow Schedule (Leg 1: Fixed vs Leg 2: Floating)</h3>
+                <span class="badge-pill" id="period-count-badge">5 Periods</span>
+                <span class="schedule-mode-badge auto" id="schedule-mode-badge">● Auto Generated</span>
+            </div>
+
+            <!-- Schedule Actions Toolbar (Paste from Excel, Copy to Excel, Reset, Export) -->
+            <div class="schedule-toolbar" onclick="event.stopPropagation();">
+                <button type="button" class="btn-tb btn-tb-murex-eval" id="btn-open-eval-modal" title="Open Murex Global Evaluation Schedule Popup">🗖 Global Flows (Evaluation)</button>
+                <button type="button" class="btn-tb btn-tb-copy" id="btn-copy-excel" title="Copy Schedule to Clipboard for Excel Ctrl+V">📋 Copy to Excel</button>
+                <button type="button" class="btn-tb btn-tb-reset" id="btn-reset-schedule" style="display:none;" title="Reset back to default vanilla schedule">↺ Reset Auto</button>
+                <button type="button" class="btn-tb" id="btn-export-csv" title="Export Schedule to CSV">📊 Export CSV</button>
+            </div>
+            
+            <!-- Schedule Tabs -->
+            <div class="schedule-tab-controls" onclick="event.stopPropagation();">
+                <button type="button" class="tab-btn active" data-tab="dual" id="tab-btn-dual">Dual-Leg Side-by-Side</button>
+                <button type="button" class="tab-btn" data-tab="leg1" id="tab-btn-leg1">Leg 1 (Fixed)</button>
+                <button type="button" class="tab-btn" data-tab="leg2" id="tab-btn-leg2">Leg 2 (Floating)</button>
+                <button type="button" class="tab-btn" data-tab="murex" id="tab-btn-murex">Murex Global View</button>
+                <button type="button" class="tab-btn" data-tab="fwd" id="tab-btn-fwd" style="display:none;">Far Leg Schedule</button>
+            </div>
+        </div>
+
+        <div class="waterfall-body" id="waterfall-content">
+            <!-- 1. Dual Comparison View -->
+            <div class="tab-pane active" id="tab-pane-dual">
+                <div class="table-wrapper">
+                    <table class="data-table dual-table" id="dual-schedule-table">
+                        <thead id="dual-schedule-thead">
+                            <tr class="murex-dual-header-top">
+                                <th colspan="8" class="murex-th-leg1-top">
+                                    <div class="murex-header-leg-box">
+                                        <div class="murex-pos-radios">
+                                            <label class="murex-chk-label">
+                                                <input type="checkbox" id="chk-hdr-leg1-pay" checked>
+                                                <span>Pay</span>
+                                            </label>
+                                            <label class="murex-chk-label">
+                                                <input type="checkbox" id="chk-hdr-leg1-rec">
+                                                <span>Receive</span>
+                                            </label>
+                                        </div>
+                                        <div class="murex-leg-title murex-title-leg1">Leg 1</div>
+                                    </div>
+                                </th>
+                                <th colspan="8" class="murex-th-leg2-top">
+                                    <div class="murex-header-leg-box">
+                                        <div class="murex-pos-radios">
+                                            <label class="murex-chk-label">
+                                                <input type="checkbox" id="chk-hdr-leg2-pay">
+                                                <span>Pay</span>
+                                            </label>
+                                            <label class="murex-chk-label">
+                                                <input type="checkbox" id="chk-hdr-leg2-rec" checked>
+                                                <span>Receive</span>
+                                            </label>
+                                        </div>
+                                        <div class="murex-leg-title murex-title-leg2">Leg 2</div>
+                                    </div>
+                                </th>
+                            </tr>
+                            <tr class="murex-dual-header-cols">
+                                <th class="col-center">Start date</th>
+                                <th class="col-center">End date</th>
+                                <th class="col-center">Pay date</th>
+                                <th class="num">Nominal</th>
+                                <th class="col-center">Fixing date</th>
+                                <th class="num">DF</th>
+                                <th class="num">Rate</th>
+                                <th class="num th-leg-divider">NPV</th>
+                                <th class="col-center">Start date</th>
+                                <th class="col-center">End date</th>
+                                <th class="col-center">Pay date</th>
+                                <th class="num">Nominal</th>
+                                <th class="col-center">Fixing date</th>
+                                <th class="num">DF</th>
+                                <th class="num">Rate</th>
+                                <th class="num">NPV</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dual-table-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 2. Leg 1 Fixed View -->
+            <div class="tab-pane" id="tab-pane-leg1">
+                <div class="table-wrapper">
+                    <table class="data-table leg1-table">
+                        <thead>
+                            <tr>
+                                <th>Period</th>
+                                <th>Start Date</th>
+                                <th>End Date</th>
+                                <th>Pay Date</th>
+                                <th class="num" id="th-leg1-notional">Notional ($)</th>
+                                <th class="num" id="th-leg1-frac">Fraction</th>
+                                <th class="num">Fixed Rate (%)</th>
+                                <th class="num" id="th-leg1-cf">Fixed Cash Flow ($)</th>
+                                <th class="num">Discount Factor</th>
+                                <th class="num" id="th-leg1-pv">Present Value ($)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leg1-table-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 3. Leg 2 Floating View -->
+            <div class="tab-pane" id="tab-pane-leg2">
+                <div class="table-wrapper">
+                    <table class="data-table leg2-table">
+                        <thead>
+                            <tr>
+                                <th>Period</th>
+                                <th>Start Date</th>
+                                <th>End Date</th>
+                                <th>Pay Date</th>
+                                <th class="num" id="th-leg2-notional">Notional ($)</th>
+                                <th class="num" id="th-leg2-frac">Fraction</th>
+                                <th class="num" id="th-leg2-fwd">Fwd Rate (%)</th>
+                                <th class="num">Spread (bp)</th>
+                                <th class="num">All-in Rate (%)</th>
+                                <th class="num" id="th-leg2-cf">Float Cash Flow ($)</th>
+                                <th class="num">Discount Factor</th>
+                                <th class="num" id="th-leg2-pv">Present Value ($)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leg2-table-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 4. Murex Global Flow Schedule View -->
+            <div class="tab-pane" id="tab-pane-murex">
+                <div class="murex-tab-banner" style="padding: 10px 14px; background: #f8fafc; border-bottom: 1px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-size: 12px; font-weight: 700; color: #334155; display: flex; align-items: center; gap: 8px;">
+                        <span>Murex Contract Cash Flow Schedule</span>
+                        <span style="font-size: 11px; font-weight: 500; color: #64748b;">(Contract Definition View)</span>
+                    </div>
+                    <button type="button" class="btn-tb btn-tb-murex-eval" id="btn-open-eval-modal-pane" style="background:#2563eb;color:#ffffff;font-weight:700;padding:6px 14px;border:none;border-radius:4px;box-shadow:0 1px 3px rgba(37,99,235,0.25);cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+                        <span>🗖</span> Open Global Evaluation Schedule Pop-up Window
+                    </button>
+                </div>
+                <div class="table-wrapper">
+                    <table class="data-table murex-table" id="murex-schedule-table">
+                        <thead>
+                            <tr>
+                                <th>Lg</th>
+                                <th>Flow Tp</th>
+                                <th>Sub. Tp</th>
+                                <th>Start Date</th>
+                                <th>End Date</th>
+                                <th class="num">Remaining Capital</th>
+                                <th>First Fixing</th>
+                                <th>Last Fixing</th>
+                                <th class="num">Rate (%)</th>
+                                <th class="num">Margin</th>
+                                <th>Payment Date</th>
+                                <th class="num">Flow</th>
+                                <th>Cur</th>
+                                <th>Index</th>
+                                <th class="num">Nb Days</th>
+                            </tr>
+                        </thead>
+                        <tbody id="murex-table-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <!-- 5. Forward Far Leg Schedule -->
+            <div class="tab-pane" id="tab-pane-fwd">
+                <div class="table-wrapper">
+                    <table class="data-table fwd-table" id="fwd-schedule-table">
+                        <thead>
+                            <tr class="super-header">
+                                <th colspan="4">Far Leg Contract</th>
+                                <th colspan="2">Notionals</th>
+                                <th colspan="4">CIP Theoretical & Discount Factors</th>
+                                <th colspan="4">Margin & Quoted Price</th>
+                                <th colspan="3">Risk & Attributions</th>
+                            </tr>
+                            <tr>
+                                <th>#</th>
+                                <th>Maturity</th>
+                                <th>Adj. Mat</th>
+                                <th>Days</th>
+                                <th class="num">Notional 1 [USD] ($)</th>
+                                <th class="num">Notional 2 [KRW] (₩)</th>
+                                <th class="num" title="USD SOFR Discount Factor for Far Leg">DF (USD)</th>
+                                <th class="num" title="KRW FX SOFR (CRS) Discount Factor for Far Leg">DF (CRS)</th>
+                                <th class="num">Theo Fwd</th>
+                                <th class="num">Theo SP (원)</th>
+                                <th class="num">Margin (bp)</th>
+                                <th class="num">Swap Mgn (원)</th>
+                                <th class="num">Quoted SP (원)</th>
+                                <th class="num">Quoted Fwd</th>
+                                <th class="num">FX Delta ($)</th>
+                                <th class="num">Spot Hedge (₩)</th>
+                                <th class="num">Sales Margin (₩)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fwd-table-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+
+    <!-- Modal for Manual Quote Override -->
+    <div class="modal-backdrop" id="quote-modal-backdrop" style="display:none;">
+        <div class="quote-modal">
+            <div class="modal-header">
+                <h3>Manual Quote Override</h3>
+                <button type="button" class="btn-close" id="modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Tenor</label>
+                    <input type="text" id="modal-tenor" readonly class="input-readonly">
+                </div>
+                <div class="form-group">
+                    <label>RIC Code</label>
+                    <input type="text" id="modal-ric" readonly class="input-readonly">
+                </div>
+                <div class="form-group">
+                    <label>Mid Rate (%)</label>
+                    <input type="number" id="modal-mid" step="0.0001" class="input-large">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="modal-cancel-btn">Cancel</button>
+                <button type="button" class="btn btn-primary" id="modal-save-btn">Save Quote</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for LSEG Workspace App Key -->
+    <div class="modal-backdrop" id="appkey-modal-backdrop" style="display:none;">
+        <div class="quote-modal">
+            <div class="modal-header">
+                <h3>LSEG Workspace Desktop Connect</h3>
+                <button type="button" class="btn-close" id="appkey-modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>LSEG Workspace App Key (Desktop Proxy Port 9000)</label>
+                    <input type="text" id="input-app-key" placeholder="Enter your LSEG App Key" class="input-large">
+                    <span style="font-size:10px;color:var(--text-muted);margin-top:4px;">Tip: In LSEG Workspace, type <code>APPKEY</code> in the top search bar to generate/view your free App Key.</span>
+                </div>
+                <div id="lseg-conn-status-msg" style="font-size:11px;color:var(--accent-cyan);">Status: Desktop Proxy Running on 127.0.0.1:9000</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="appkey-modal-cancel-btn">Cancel</button>
+                <button type="button" class="btn btn-primary" id="appkey-modal-save-btn">Connect Live Feed</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Murex Global Evaluation Schedule Popup Modal (Exact Murex Desktop Window Replica) -->
+    <div class="eval-modal-backdrop" id="eval-modal-backdrop" style="display:none;">
+        <div class="eval-modal-window" id="eval-modal-window">
+            <!-- Window Title Bar (Draggable) -->
+            <div class="eval-modal-header" id="eval-modal-header">
+                <div class="eval-modal-title">
+                    <span class="eval-murex-icon"></span>
+                    <span>Global evaluation schedule</span>
+                </div>
+                <div class="eval-modal-actions">
+                    <button type="button" class="eval-win-btn" id="eval-modal-btn-max" title="Maximize / Restore">🗖</button>
+                    <button type="button" class="eval-win-btn close" id="eval-modal-btn-close" title="Close Window">✕</button>
+                </div>
+            </div>
+
+            <!-- Tabs: Leg 1, Leg 2, All legs -->
+            <div class="eval-modal-tabs-bar">
+                <button type="button" class="eval-tab-btn" data-eval-tab="leg1" id="eval-tab-leg1">Leg 1</button>
+                <button type="button" class="eval-tab-btn" data-eval-tab="leg2" id="eval-tab-leg2">Leg 2</button>
+                <button type="button" class="eval-tab-btn active" data-eval-tab="all" id="eval-tab-all">All legs</button>
+            </div>
+
+            <!-- Sub-bar (Aggregated view) -->
+            <div class="eval-modal-subbar" id="eval-modal-subbar">
+                Aggregated view
+            </div>
+
+            <!-- Body / Table -->
+            <div class="eval-modal-body">
+                <div class="eval-table-container">
+                    <table class="eval-table" id="eval-schedule-table">
+                        <thead>
+                            <tr>
+                                <th class="th-lg">Lg</th>
+                                <th class="th-date">Eval Date</th>
+                                <th class="th-flow">Flow</th>
+                                <th class="th-df">Disc Factor</th>
+                                <th class="th-pv">Discounted Flow</th>
+                                <th class="th-cur">Cur</th>
+                            </tr>
+                        </thead>
+                        <tbody id="eval-table-body">
+                            <!-- Populated dynamically by app.js -->
+                        </tbody>
+                        <tfoot>
+                            <tr class="eval-total-row">
+                                <td class="col-lg"></td>
+                                <td class="col-date"></td>
+                                <td class="col-num">
+                                    <div class="eval-recessed-box" id="eval-total-flow">-</div>
+                                </td>
+                                <td class="col-num"></td>
+                                <td class="col-num">
+                                    <div class="eval-recessed-box" id="eval-total-disc-flow">-</div>
+                                </td>
+                                <td class="col-cur"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Modal Bottom Toolbar -->
+            <div class="eval-modal-footer">
+                <div class="eval-footer-info" id="eval-footer-info">
+                    <span id="eval-info-trade-tag">KRW CD IRS</span> | Deal NPV: <strong id="eval-info-npv">0</strong> | Tenor: <strong id="eval-info-tenor">1Y</strong>
+                </div>
+                <div class="eval-footer-btns">
+                    <button type="button" class="btn-eval-action btn-eval-copy" id="eval-btn-copy" title="Copy Table to Clipboard for Excel">📋 Copy Table</button>
+                    <button type="button" class="btn-eval-action btn-eval-close" id="eval-btn-close-footer">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="app.js?v=4.2"></script>
+</body>
+</html>

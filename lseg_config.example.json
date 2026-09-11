@@ -1,0 +1,7 @@
+{
+  "_comment": "Copy to lseg_config.json and fill in. The real file is gitignored because it holds a live LSEG Workspace app key.",
+  "app_key": "YOUR_LSEG_WORKSPACE_APP_KEY",
+  "app_display_name": "SOFR_PRICER",
+  "product_id": "YOUR_ORG.SOFRPRICER",
+  "updated_at": ""
+}

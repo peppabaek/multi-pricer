@@ -1,0 +1,70 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 1481 >>
+stream
+BT
+/F1 9 Tf
+12 TL
+36 760 Td
+(CONFIRMATION - KRW KOFR OVERNIGHT INDEX SWAP) Tj T*
+() Tj T*
+(Date: 11 September 2026) Tj T*
+(To: Hana Securities Co., Ltd.) Tj T*
+(Attention: Derivatives Trading Desk) Tj T*
+(Contact: +82 2-3771-8899) Tj T*
+(Our Reference: WRB-KOFR-2026-9021) Tj T*
+() Tj T*
+(Party A: Woori Bank) Tj T*
+(Party B: Hana Securities Co., Ltd.) Tj T*
+() Tj T*
+(GENERAL TERMS) Tj T*
+(Trade Date:                      11 September 2026) Tj T*
+(Effective Date:                  14 September 2026) Tj T*
+(Termination Date:                14 September 2027) Tj T*
+(Notional Amount:                 KRW 100,000,000,000) Tj T*
+(Business Days:                   Seoul) Tj T*
+(Business Day Convention:         Modified Following) Tj T*
+() Tj T*
+(FIXED LEG \(Party B pays\)) Tj T*
+(Fixed Rate:                      2.8450% per annum) Tj T*
+(Day Count Fraction:              Act/365 Fixed) Tj T*
+(Payment Frequency:               Quarterly) Tj T*
+(Payment Delay:                   2 business days) Tj T*
+() Tj T*
+(FLOATING LEG \(Party A pays\)) Tj T*
+(Floating Rate Option:            KRW-KOFR \(compounded in arrears\)) Tj T*
+(Spread:                          +0.00 bp) Tj T*
+(Day Count Fraction:              Act/365 Fixed) Tj T*
+(Payment Frequency:               Quarterly) Tj T*
+(Payment Delay:                   2 business days) Tj T*
+() Tj T*
+(For Woori Bank                   For Hana Securities Co., Ltd.) Tj T*
+(Authorized Signature             Authorized Signature) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001774 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1844
+%%EOF

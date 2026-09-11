@@ -1,0 +1,23 @@
+# Server
+fastapi
+uvicorn
+pydantic>=2
+
+# Curve construction
+scipy
+numpy
+QuantLib
+
+# Market data (LSEG Workspace desktop session)
+eikon
+
+# Term sheet extraction
+anthropic
+pypdf
+
+# Optional second opinion for cross-validation
+# google-generativeai
+# openai
+
+# Test tooling
+# playwright   # browser test only: pip install playwright && playwright install chromium

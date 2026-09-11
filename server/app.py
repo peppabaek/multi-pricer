@@ -1,0 +1,1476 @@
+"""
+FastAPI Server for USD SOFR and KRW CD 91D IRS Live Pricer Dashboard
+Exposes On-Demand Snapshot, Dual-Leg Pricing, Custom Schedule Customization, and Quote Override REST APIs
+"""
+
+import os
+import re
+import sys
+import datetime
+import time
+import asyncio
+import warnings
+from typing import Dict, Any, Optional, List, Tuple
+
+# Suppress Eikon library internal pandas FutureWarning
+warnings.filterwarnings("ignore", category=FutureWarning)
+
+# Suppress benign Windows asyncio ConnectionResetError (WinError 10054) on abrupt client socket close
+if sys.platform == "win32":
+    try:
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+        _orig_call_connection_lost = _ProactorBasePipeTransport._call_connection_lost
+        def _patched_call_connection_lost(self, exc=None):
+            try:
+                _orig_call_connection_lost(self, exc)
+            except ConnectionResetError:
+                pass
+            except OSError as e:
+                if getattr(e, "winerror", None) == 10054:
+                    pass
+                else:
+                    raise
+        _ProactorBasePipeTransport._call_connection_lost = _patched_call_connection_lost
+    except Exception:
+        pass
+
+from fastapi import FastAPI, HTTPException, Response, UploadFile, File
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from starlette.formparsers import MultiPartParser
+
+# Keep uploaded termsheets in memory. Starlette spools multipart bodies to a temp file
+# above 1 MB by default, which would leave the document on disk.
+MultiPartParser.spool_max_size = 32 * 1024 * 1024
+
+# Add project root to sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+# Common Rollercoaster & Smart Excel Schedule Engine
+from common_pricer.rollercoaster_engine import parse_rollercoaster_paste
+
+# USD SOFR Engines
+from sofr_pricer import (
+    parse_date, apply_convention, add_business_days,
+    bootstrap_sofr_curve, bootstrap_advanced_sofr_curve,
+    USDSOFRSwapPricer, SOFRCurve, AdvancedSOFRCurve,
+    CompositeSOFRCurve, create_hedge_composite_curve
+)
+from server.tradition_feed import tradition_feed
+
+# KRW CD 91D Engines
+from krw_pricer import (
+    get_krw_spot_date, apply_krw_convention,
+    bootstrap_krw_curve, KRWSwapPricer, KRWCurve
+)
+from server.krw_feed import krw_feed
+
+# KRW KOFR OIS Engines
+from kofr_pricer import (
+    get_spot_date as get_kofr_spot_date, apply_kofr_convention,
+    bootstrap_kofr_curve, KOFRSwapPricer, KOFRCurve
+)
+from server.kofr_feed import kofr_feed
+
+# KRW FX SOFR (CRS) Engines
+from crs_pricer import (
+    get_crs_spot_date, apply_crs_convention,
+    bootstrap_crs_curve, KRWFXSOFRSwapPricer, KRWFXSOFRCurve
+)
+from server.crs_feed import crs_feed
+
+# KMBC FX Forward & Swap Point Feed
+from server.kmbc_fwd_feed import kmbc_fwd_feed_instance as kmbc_fwd_feed
+
+# Forward Swap Point Engine
+from fwd_pricer.fwd_swap_engine import FwdSwapPricer, parse_trader_paste_text
+
+app = FastAPI(title="Multi-Currency (USD SOFR / KRW CD / KRW KOFR / KRW CRS / FX FWD) Live Pricer Dashboard")
+
+# CORS setup
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class FwdPricingRequest(BaseModel):
+    spot_fx: Optional[float] = None
+    default_margin_bp: Optional[float] = 1.0
+    pricing_date: Optional[str] = None
+    calendar: Optional[str] = "SEB_NYB"
+    raw_paste_text: Optional[str] = None
+    far_legs: Optional[List[Dict[str, Any]]] = None
+
+class PricingRequest(BaseModel):
+    currency: Optional[str] = "USD" # "USD", "KRW", "KRW_KOFR", "KRW_CRS"
+    notional: float = 100_000_000.0
+    usd_notional: Optional[float] = None
+    krw_notional: Optional[float] = None
+    spot_fx: Optional[float] = None
+    position: str = "Pay Fixed" # "Pay Fixed" or "Rec Fixed"
+    fixed_coupon_pct: Optional[float] = None
+    spread_bp: float = 0.0
+    tenor: str = "5Y"
+    
+    # Curve Model Selection (USD SOFR only & CRS USD OIS)
+    curve_type: Optional[str] = "Standard" # "Standard" or "Advanced"
+    
+    # CRS Specific
+    crs_swap_type: Optional[str] = "Vanilla" # "Vanilla" or "Fixed-Fixed"
+    usd_fixed_coupon_pct: Optional[float] = None # For Fixed-Fixed CRS USD Leg
+    
+    # Advanced Parametric Selection Fields (Legacy / Unified Fallback)
+    day_count: Optional[str] = None # "Act/365", "Act/360", "30/360", "Act/Act"
+    fix_cal: Optional[str] = None   # "SEB", "LNB", "NYB", "TKB", "SEB_NYB", "TGT", etc.
+    pay_cal: Optional[str] = None   # "SEB", "LNB", "NYB", "TKB", "SEB_NYB", "TGT", etc.
+    payment_freq: Optional[str] = None # "1M", "3M", "6M", "12M"
+    frequency_months: Optional[int] = None
+    business_day_conv: Optional[str] = None # "Modified Following", "Following", "Preceding"
+    stub_rule: Optional[str] = None # "Short in arrears", "Short upfront", "Long in arrears", "Long upfront"
+    adjust_rule: Optional[str] = None # "Adjust", "Unadjust"
+    fix_day: Optional[int] = None # e.g. -1, -2, 0
+
+    # Independent Leg 1 (Fixed / KRW) Parameters
+    leg1_day_count: Optional[str] = None
+    leg1_payment_freq: Optional[str] = None
+    leg1_frequency_months: Optional[int] = None
+    leg1_business_day_conv: Optional[str] = None
+    leg1_stub_rule: Optional[str] = None
+    leg1_adjust_rule: Optional[str] = None
+    leg1_calendar: Optional[str] = None
+
+    # Independent Leg 2 (Floating / USD) Parameters
+    leg2_day_count: Optional[str] = None
+    leg2_payment_freq: Optional[str] = None
+    leg2_frequency_months: Optional[int] = None
+    leg2_business_day_conv: Optional[str] = None
+    leg2_stub_rule: Optional[str] = None
+    leg2_adjust_rule: Optional[str] = None
+    leg2_calendar: Optional[str] = None
+    leg2_fix_day: Optional[int] = None
+    
+    payment_lag_bd: Optional[int] = None
+    effective_date: Optional[str] = None
+    maturity_date: Optional[str] = None
+    pricing_date: Optional[str] = None
+    settle_date: Optional[str] = None
+    custom_schedule: Optional[List[Dict[str, Any]]] = None
+    leg1_custom_schedule: Optional[List[Dict[str, Any]]] = None
+    leg2_custom_schedule: Optional[List[Dict[str, Any]]] = None
+    raw_paste_text: Optional[str] = None
+    leg1_raw_paste_text: Optional[str] = None
+    leg2_raw_paste_text: Optional[str] = None
+
+class RollercoasterParseRequest(BaseModel):
+    raw_paste_text: Optional[str] = None
+    leg1_raw_paste_text: Optional[str] = None
+    leg2_raw_paste_text: Optional[str] = None
+    currency: Optional[str] = "USD"
+    effective_date: Optional[str] = None
+    notional: Optional[float] = 100_000_000.0
+    fixed_coupon_pct: Optional[float] = 0.0
+    spread_bp: Optional[float] = 0.0
+
+_TENOR_RE = re.compile(r"^\d+(?:\.\d+)?\s*[MY]$", re.IGNORECASE)
+
+
+def _parse_date_arg(label: str, value: Optional[str]) -> Optional[datetime.date]:
+    if not value:
+        return None
+    try:
+        return parse_date(value)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"{label} '{value}' is not a valid YYYY-MM-DD date")
+
+
+def _validate_pricing_request(req: PricingRequest) -> None:
+    """Reject trades that would otherwise be priced silently against the wrong terms."""
+    eff = _parse_date_arg("effective_date", req.effective_date)
+    mat = _parse_date_arg("maturity_date", req.maturity_date)
+    _parse_date_arg("pricing_date", req.pricing_date)
+    _parse_date_arg("settle_date", req.settle_date)
+
+    if mat is not None and eff is not None and mat <= eff:
+        raise HTTPException(
+            status_code=400,
+            detail=f"maturity_date {req.maturity_date} must be after effective_date {req.effective_date}"
+        )
+
+    if mat is None:
+        tenor = (req.tenor or "").strip()
+        if not _TENOR_RE.match(tenor):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unrecognised tenor '{req.tenor}'. Use a form like 3M, 18M or 5Y, "
+                       f"or supply maturity_date instead."
+            )
+
+    for label, val in (("notional", req.notional),
+                       ("usd_notional", req.usd_notional),
+                       ("krw_notional", req.krw_notional)):
+        if val is not None and val <= 0:
+            raise HTTPException(status_code=400, detail=f"{label} must be greater than zero (got {val})")
+
+    if req.spot_fx is not None and req.spot_fx <= 0:
+        raise HTTPException(status_code=400, detail=f"spot_fx must be greater than zero (got {req.spot_fx})")
+
+
+def _resolve_freq_months(freq_str: Optional[str], freq_months: Optional[int], default_months: int) -> int:
+    if freq_months and freq_months > 0:
+        return freq_months
+    if freq_str:
+        s = freq_str.strip().upper()
+        if "12" in s or "1Y" in s:
+            return 12
+        elif "6" in s:
+            return 6
+        elif "3" in s:
+            return 3
+        elif "1" in s:
+            return 1
+    return default_months
+
+def _resolve_custom_schedules(
+    req: PricingRequest,
+    eff_date: datetime.date,
+    default_notional: float,
+    default_coupon: float,
+    default_spread: float,
+    currency: str
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[List[Dict[str, Any]]]]:
+    leg1_sched = req.leg1_custom_schedule
+    leg2_sched = req.leg2_custom_schedule
+    
+    # Check Leg 1 paste
+    if req.leg1_raw_paste_text and req.leg1_raw_paste_text.strip():
+        p1 = parse_rollercoaster_paste(
+            raw_text=req.leg1_raw_paste_text,
+            effective_date=eff_date,
+            default_notional=default_notional,
+            default_coupon_pct=default_coupon,
+            default_spread_bp=default_spread,
+            currency=currency
+        )
+        if p1:
+            leg1_sched = p1
+            
+    # Check Leg 2 paste
+    if req.leg2_raw_paste_text and req.leg2_raw_paste_text.strip():
+        p2 = parse_rollercoaster_paste(
+            raw_text=req.leg2_raw_paste_text,
+            effective_date=eff_date,
+            default_notional=default_notional,
+            default_coupon_pct=default_coupon,
+            default_spread_bp=default_spread,
+            currency=currency
+        )
+        if p2:
+            leg2_sched = p2
+
+    # Fallback to legacy single paste or custom_schedule if neither leg1 nor leg2 is set
+    if not leg1_sched and not leg2_sched:
+        if req.raw_paste_text and req.raw_paste_text.strip():
+            p_common = parse_rollercoaster_paste(
+                raw_text=req.raw_paste_text,
+                effective_date=eff_date,
+                default_notional=default_notional,
+                default_coupon_pct=default_coupon,
+                default_spread_bp=default_spread,
+                currency=currency
+            )
+            if p_common:
+                leg1_sched = p_common
+                leg2_sched = p_common
+        elif req.custom_schedule:
+            leg1_sched = req.custom_schedule
+            leg2_sched = req.custom_schedule
+
+    return leg1_sched, leg2_sched
+
+class QuoteUpdateRequest(BaseModel):
+    tenor: str
+    mid: float
+    bid: Optional[float] = None
+    ask: Optional[float] = None
+
+class AppKeyRequest(BaseModel):
+    app_key: str
+
+@app.post("/api/lseg/set-app-key")
+def set_lseg_app_key(req: AppKeyRequest):
+    """Register LSEG Workspace App Key and connect to Desktop proxy"""
+    success, msg = tradition_feed.set_app_key(req.app_key)
+    krw_feed._app_key = req.app_key
+    krw_feed._ek_initialized = False
+    krw_feed.trigger_on_demand_refresh()
+    return {
+        "status": "success" if success else "failed",
+        "is_connected": tradition_feed.is_lseg_live_connected,
+        "message": msg
+    }
+
+# ==============================================================================
+# USD SOFR ENDPOINTS
+# ==============================================================================
+
+def _build_usd_curve(snapshot: Dict[str, Any], p_date_str: Optional[str] = None, s_date_str: Optional[str] = None, curve_type: Optional[str] = "Standard"):
+    today = datetime.date.today()
+    pricing_date = parse_date(p_date_str) if p_date_str else today
+    settle_date = parse_date(s_date_str) if s_date_str else add_business_days(pricing_date, 2)
+    
+    quote_tuples = []
+    for q in snapshot["quotes"]:
+        quote_tuples.append((q["tenor"], float(q["mid"])))
+        
+    c_type = (curve_type or "").strip().lower()
+    if c_type in ("hedgecurve", "hedge_curve", "hedge"):
+        adv = bootstrap_advanced_sofr_curve(pricing_date, settle_date, quote_tuples)
+        curve = CompositeSOFRCurve(adv)
+    elif c_type == "advanced":
+        curve = bootstrap_advanced_sofr_curve(pricing_date, settle_date, quote_tuples)
+    else:
+        curve = bootstrap_sofr_curve(pricing_date, settle_date, quote_tuples)
+    return curve
+
+@app.get("/api/market-snapshot")
+def get_market_snapshot(pricing_date: Optional[str] = None, settle_date: Optional[str] = None, curve_type: Optional[str] = "Standard", reload: Optional[bool] = False):
+    """[USD] Get immutable market data snapshot and bootstrapped curve (<0.1ms)"""
+    if reload:
+        tradition_feed.trigger_on_demand_refresh()
+    snapshot = tradition_feed.get_snapshot()
+    curve = _build_usd_curve(snapshot, pricing_date, settle_date, curve_type)
+    
+    bootstrapped_curve = []
+    for p in curve.pillars:
+        bootstrapped_curve.append({
+            "tenor": p["tenor"],
+            "mat_date": p["mat_date"].strftime("%Y-%m-%d"),
+            "par_rate": round(p["rate"], 4),
+            "df": round(p["df"], 6),
+            "zero_rate": round(p["zero_rate"], 4)
+        })
+
+    return {
+        "status": "success",
+        "data": {
+            "currency": "USD",
+            "source": snapshot["source"],
+            "status_message": snapshot.get("status_message", "Live"),
+            "is_live_connected": snapshot.get("is_live_connected", False),
+            "has_app_key": snapshot.get("has_app_key", False),
+            "timestamp": snapshot["timestamp"],
+            "epoch_ms": snapshot["epoch_ms"],
+            "pricing_date": curve.pricing_date.strftime("%Y-%m-%d"),
+            "settle_date": curve.settle_date.strftime("%Y-%m-%d"),
+            "quotes": snapshot["quotes"],
+            "curve_pillars": bootstrapped_curve,
+            "curve_type": curve_type or "Standard"
+        }
+    }
+
+@app.post("/api/price")
+def calculate_pricing(req: PricingRequest):
+    """[USD] Calculate Par Swap Rate, NPV, DV01, and Dual-Leg Schedule (Auto or Custom Pasted)"""
+    _validate_pricing_request(req)
+    try:
+        snapshot = tradition_feed.get_snapshot()
+        curve = _build_usd_curve(snapshot, req.pricing_date, req.settle_date, req.curve_type)
+        pricer = USDSOFRSwapPricer(curve)
+        
+        eff_date = parse_date(req.effective_date) if req.effective_date else None
+        mat_date = parse_date(req.maturity_date) if req.maturity_date else None
+        l1_freq = _resolve_freq_months(req.leg1_payment_freq or req.payment_freq, req.leg1_frequency_months or req.frequency_months, 12)
+        l2_freq = _resolve_freq_months(req.leg2_payment_freq or req.payment_freq, req.leg2_frequency_months or req.frequency_months, 12)
+        
+        eff_for_rc = eff_date or (curve.settle_date if hasattr(curve, "settle_date") else datetime.date.today())
+        leg1_sched, leg2_sched = _resolve_custom_schedules(
+            req=req,
+            eff_date=eff_for_rc,
+            default_notional=req.notional if req.notional > 0 else 100_000_000.0,
+            default_coupon=req.fixed_coupon_pct or 0.0,
+            default_spread=req.spread_bp or 0.0,
+            currency="USD"
+        )
+
+        result = pricer.price_swap(
+            notional=req.notional,
+            position=req.position,
+            fixed_coupon_pct=req.fixed_coupon_pct,
+            spread_bp=req.spread_bp,
+            effective_date=eff_date,
+            maturity_date=mat_date,
+            tenor_str=req.tenor,
+            frequency_months=l1_freq,
+            day_count=req.leg1_day_count or req.day_count or "Act/360",
+            business_day_conv=req.leg1_business_day_conv or req.business_day_conv or "Modified Following",
+            stub_rule=req.leg1_stub_rule or req.stub_rule or "Short in arrears",
+            adjust_rule=req.leg1_adjust_rule or req.adjust_rule or "Adjust",
+            fix_cal=req.leg2_calendar or req.fix_cal or "NYB",
+            pay_cal=req.leg1_calendar or req.pay_cal or "NYB",
+            fix_day=req.leg2_fix_day if req.leg2_fix_day is not None else (req.fix_day if req.fix_day is not None else -2),
+            custom_schedule=leg1_sched,
+            leg1_custom_schedule=leg1_sched,
+            leg2_custom_schedule=leg2_sched,
+            leg1_frequency_months=l1_freq,
+            leg1_day_count=req.leg1_day_count or req.day_count or "Act/360",
+            leg1_stub_rule=req.leg1_stub_rule or req.stub_rule or "Short in arrears",
+            leg1_business_day_conv=req.leg1_business_day_conv or req.business_day_conv or "Modified Following",
+            leg1_adjust_rule=req.leg1_adjust_rule or req.adjust_rule or "Adjust",
+            leg1_pay_cal=req.leg1_calendar or req.pay_cal or "NYB",
+            leg2_frequency_months=l2_freq,
+            leg2_day_count=req.leg2_day_count or req.day_count or "Act/360",
+            leg2_stub_rule=req.leg2_stub_rule or req.stub_rule or "Short in arrears",
+            leg2_business_day_conv=req.leg2_business_day_conv or req.business_day_conv or "Modified Following",
+            leg2_adjust_rule=req.leg2_adjust_rule or req.adjust_rule or "Adjust",
+            leg2_pay_cal=req.leg2_calendar or req.pay_cal or "NYB",
+            leg2_fix_cal=req.leg2_calendar or req.fix_cal or "NYB",
+            leg2_fix_day=req.leg2_fix_day if req.leg2_fix_day is not None else (req.fix_day if req.fix_day is not None else -2)
+        )
+        
+        result["snapshot_info"] = {
+            "currency": "USD",
+            "curve_type": req.curve_type or "Standard",
+            "source": snapshot.get("source", "LSEG Workspace Tradition Feed"),
+            "timestamp": snapshot.get("timestamp", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            "pricing_date": curve.pricing_date.strftime("%Y-%m-%d"),
+            "settle_date": curve.settle_date.strftime("%Y-%m-%d")
+        }
+        
+        return {"status": "success", "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/reload-and-price")
+def reload_and_price_usd(req: PricingRequest):
+    """[USD ONE-SHOT F9] Reload latest market data and calculate pricing in a single step"""
+    tradition_feed.trigger_on_demand_refresh()
+    snapshot = tradition_feed.get_snapshot()
+    curve = _build_usd_curve(snapshot, req.pricing_date, req.settle_date, req.curve_type)
+    pricing_res = calculate_pricing(req)
+    
+    bootstrapped_curve = []
+    for p in curve.pillars:
+        bootstrapped_curve.append({
+            "tenor": p["tenor"],
+            "mat_date": p["mat_date"].strftime("%Y-%m-%d"),
+            "par_rate": round(p["rate"], 4),
+            "df": round(p["df"], 6),
+            "zero_rate": round(p["zero_rate"], 4)
+        })
+
+    market_snapshot = {
+        "currency": "USD",
+        "source": snapshot.get("source", "LSEG Workspace Tradition Feed"),
+        "status_message": snapshot.get("status_message", "Live"),
+        "is_live_connected": snapshot.get("is_live_connected", False),
+        "has_app_key": snapshot.get("has_app_key", False),
+        "timestamp": snapshot.get("timestamp", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        "epoch_ms": snapshot.get("epoch_ms", int(time.time() * 1000)),
+        "pricing_date": curve.pricing_date.strftime("%Y-%m-%d"),
+        "settle_date": curve.settle_date.strftime("%Y-%m-%d"),
+        "quotes": snapshot.get("quotes", []),
+        "curve_pillars": bootstrapped_curve,
+        "curve_type": req.curve_type or "Standard"
+    }
+
+    pricing_data = pricing_res.get("data") if isinstance(pricing_res, dict) else pricing_res
+
+    return {
+        "status": "success",
+        "data": pricing_data,
+        "pricing": pricing_data,
+        "market_snapshot": market_snapshot
+    }
+
+@app.post("/api/quotes/update")
+def update_manual_quote_usd(req: QuoteUpdateRequest):
+    tradition_feed.update_quote(req.tenor, req.mid, req.bid, req.ask)
+    return {"status": "success", "message": f"USD Quote for {req.tenor} updated to {req.mid}%"}
+
+@app.post("/api/quotes/reset")
+def reset_quotes_usd():
+    tradition_feed.reset_to_base()
+    return {"status": "success", "message": "All USD quotes reset to baseline"}
+
+
+# ==============================================================================
+# KRW CD 91D IRS ENDPOINTS
+# ==============================================================================
+
+def _build_krw_curve(snapshot: Dict[str, Any], p_date_str: Optional[str] = None, s_date_str: Optional[str] = None) -> KRWCurve:
+    today = datetime.date.today()
+    pricing_date = parse_date(p_date_str) if p_date_str else today
+    settle_date = parse_date(s_date_str) if s_date_str else get_krw_spot_date(pricing_date)
+    
+    quote_tuples = []
+    for q in snapshot["quotes"]:
+        quote_tuples.append((q["tenor"], float(q["mid"])))
+        
+    curve = bootstrap_krw_curve(pricing_date, settle_date, quote_tuples)
+    return curve
+
+@app.get("/api/krw/market-snapshot")
+def get_krw_market_snapshot(pricing_date: Optional[str] = None, settle_date: Optional[str] = None, reload: Optional[bool] = False):
+    """[KRW] Get immutable market data snapshot and bootstrapped KRW curve (<0.1ms)"""
+    if reload:
+        krw_feed.trigger_on_demand_refresh()
+    snapshot = krw_feed.get_snapshot()
+    curve = _build_krw_curve(snapshot, pricing_date, settle_date)
+    
+    bootstrapped_curve = []
+    for p in curve.pillars:
+        bootstrapped_curve.append({
+            "tenor": p["tenor"],
+            "mat_date": p["mat_date"].strftime("%Y-%m-%d"),
+            "par_rate": round(p["rate"], 4),
+            "df": round(p["df"], 6),
+            "zero_rate": round(p["zero_rate"], 4)
+        })
+        
+    return {
+        "status": "success",
+        "snapshot_info": {
+            "currency": "KRW",
+            "source": snapshot["source"],
+            "status_message": snapshot.get("status_message", "Live"),
+            "is_live_connected": snapshot.get("is_live_connected", False),
+            "has_app_key": snapshot.get("has_app_key", False),
+            "timestamp": snapshot["timestamp"],
+            "epoch_ms": snapshot["epoch_ms"],
+            "pricing_date": curve.pricing_date.strftime("%Y-%m-%d"),
+            "settle_date": curve.settle_date.strftime("%Y-%m-%d"),
+            "df_settle": round(curve.df_settle, 6)
+        },
+        "quotes": snapshot["quotes"],
+        "curve_pillars": bootstrapped_curve
+    }
+
+@app.post("/api/krw/price")
+def calculate_krw_pricing(req: PricingRequest):
+    """[KRW] Calculate Par Swap Rate, NPV (₩), DV01 (₩/bp), and Dual-Leg Schedule (Auto or Custom Pasted)"""
+    _validate_pricing_request(req)
+    try:
+        snapshot = krw_feed.get_snapshot()
+        curve = _build_krw_curve(snapshot, req.pricing_date, req.settle_date)
+        pricer = KRWSwapPricer(curve)
+        
+        eff_date = parse_date(req.effective_date) if req.effective_date else None
+        mat_date = parse_date(req.maturity_date) if req.maturity_date else None
+        l1_freq = _resolve_freq_months(req.leg1_payment_freq or req.payment_freq, req.leg1_frequency_months or req.frequency_months, 3)
+        l2_freq = _resolve_freq_months(req.leg2_payment_freq or req.payment_freq, req.leg2_frequency_months or req.frequency_months, 3)
+        
+        eff_for_rc = eff_date or (curve.settle_date if hasattr(curve, "settle_date") else datetime.date.today())
+        leg1_sched, leg2_sched = _resolve_custom_schedules(
+            req=req,
+            eff_date=eff_for_rc,
+            default_notional=req.notional if req.notional > 0 else 10_000_000_000.0,
+            default_coupon=req.fixed_coupon_pct or 0.0,
+            default_spread=req.spread_bp or 0.0,
+            currency="KRW"
+        )
+
+        result = pricer.price_swap(
+            notional=req.notional if req.notional > 0 else 10_000_000_000.0,
+            position=req.position,
+            fixed_coupon_pct=req.fixed_coupon_pct,
+            spread_bp=req.spread_bp,
+            effective_date=eff_date,
+            maturity_date=mat_date,
+            tenor_str=req.tenor if req.tenor else "3Y",
+            frequency_months=l1_freq,
+            day_count=req.leg1_day_count or req.day_count or "Act/365",
+            business_day_conv=req.leg1_business_day_conv or req.business_day_conv or "Modified Following",
+            stub_rule=req.leg1_stub_rule or req.stub_rule or "Short in arrears",
+            adjust_rule=req.leg1_adjust_rule or req.adjust_rule or "Adjust",
+            fix_cal=req.leg2_calendar or req.fix_cal or "SEB",
+            pay_cal=req.leg1_calendar or req.pay_cal or "SEB",
+            fix_day=req.leg2_fix_day if req.leg2_fix_day is not None else (req.fix_day if req.fix_day is not None else -1),
+            custom_schedule=leg1_sched,
+            leg1_custom_schedule=leg1_sched,
+            leg2_custom_schedule=leg2_sched,
+            leg1_frequency_months=l1_freq,
+            leg1_day_count=req.leg1_day_count or req.day_count or "Act/365",
+            leg1_stub_rule=req.leg1_stub_rule or req.stub_rule or "Short in arrears",
+            leg1_business_day_conv=req.leg1_business_day_conv or req.business_day_conv or "Modified Following",
+            leg1_adjust_rule=req.leg1_adjust_rule or req.adjust_rule or "Adjust",
+            leg1_pay_cal=req.leg1_calendar or req.pay_cal or "SEB",
+            leg2_frequency_months=l2_freq,
+            leg2_day_count=req.leg2_day_count or req.day_count or "Act/365",
+            leg2_stub_rule=req.leg2_stub_rule or req.stub_rule or "Short in arrears",
+            leg2_business_day_conv=req.leg2_business_day_conv or req.business_day_conv or "Modified Following",
+            leg2_adjust_rule=req.leg2_adjust_rule or req.adjust_rule or "Adjust",
+            leg2_pay_cal=req.leg2_calendar or req.pay_cal or "SEB",
+            leg2_fix_cal=req.leg2_calendar or req.fix_cal or "SEB",
+            leg2_fix_day=req.leg2_fix_day if req.leg2_fix_day is not None else (req.fix_day if req.fix_day is not None else -1)
+        )
+        
+        result["snapshot_info"] = {
+            "currency": "KRW",
+            "source": snapshot.get("source", "LSEG Workspace KRW Feed"),
+            "timestamp": snapshot.get("timestamp", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            "pricing_date": curve.pricing_date.strftime("%Y-%m-%d"),
+            "settle_date": curve.settle_date.strftime("%Y-%m-%d")
+        }
+        
+        return {"status": "success", "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/krw/reload-and-price")
+def reload_and_price_krw(req: PricingRequest):
+    """[KRW ONE-SHOT F9] Reload latest market data and calculate KRW pricing in a single step"""
+    krw_feed.trigger_on_demand_refresh()
+    snapshot = krw_feed.get_snapshot()
+    curve = _build_krw_curve(snapshot, req.pricing_date, req.settle_date)
+    pricing_res = calculate_krw_pricing(req)
+    
+    bootstrapped_curve = []
+    for p in curve.pillars:
+        bootstrapped_curve.append({
+            "tenor": p["tenor"],
+            "mat_date": p["mat_date"].strftime("%Y-%m-%d"),
+            "par_rate": round(p["rate"], 4),
+            "df": round(p["df"], 6),
+            "zero_rate": round(p["zero_rate"], 4)
+        })
+        
+    market_snapshot = {
+        "currency": "KRW",
+        "source": snapshot["source"],
+        "status_message": snapshot.get("status_message", "Live"),
+        "is_live_connected": snapshot.get("is_live_connected", False),
+        "has_app_key": snapshot.get("has_app_key", False),
+        "timestamp": snapshot["timestamp"],
+        "epoch_ms": snapshot["epoch_ms"],
+        "pricing_date": curve.pricing_date.strftime("%Y-%m-%d"),
+        "settle_date": curve.settle_date.strftime("%Y-%m-%d"),
+        "df_settle": round(curve.df_settle, 6),
+        "quotes": snapshot["quotes"],
+        "curve_pillars": bootstrapped_curve
+    }
+    pricing_data = pricing_res.get("data") if isinstance(pricing_res, dict) else pricing_res
+    return {
+        "status": "success",
+        "data": pricing_data,
+        "pricing": pricing_data,
+        "market_snapshot": market_snapshot
+    }
+
+@app.post("/api/krw/quotes/update")
+def update_manual_quote_krw(req: QuoteUpdateRequest):
+    krw_feed.update_quote(req.tenor, req.mid)
+    return {"status": "success", "message": f"KRW Quote for {req.tenor} updated to {req.mid}%"}
+
+@app.post("/api/krw/quotes/reset")
+def reset_quotes_krw():
+    krw_feed.reset_to_base()
+    return {"status": "success", "message": "All KRW quotes reset to baseline"}
+
+
+# ==============================================================================
+# KRW KOFR OIS API ENDPOINTS ('\KRW KOFR Q 3M')
+# ==============================================================================
+def _build_kofr_curve(snapshot: Dict[str, Any], pricing_date_str: Optional[str] = None, settle_date_str: Optional[str] = None) -> KOFRCurve:
+    p_date = parse_date(pricing_date_str) if pricing_date_str else datetime.date.today()
+    s_date = parse_date(settle_date_str) if settle_date_str else get_kofr_spot_date(p_date, 1)
+    
+    quote_tuples = []
+    for q in snapshot.get("quotes", []):
+        quote_tuples.append((q["tenor"], float(q["mid"])))
+        
+    return bootstrap_kofr_curve(p_date, s_date, quote_tuples)
+
+@app.get("/api/kofr/market-snapshot")
+def get_kofr_market_snapshot(pricing_date: Optional[str] = None, settle_date: Optional[str] = None, reload: Optional[bool] = False):
+    """Fetch instant live KOFR OIS snapshot and calibrated 3M curve"""
+    if reload:
+        kofr_feed.trigger_on_demand_refresh()
+    snapshot = kofr_feed.get_snapshot()
+    curve = _build_kofr_curve(snapshot, pricing_date, settle_date)
+    
+    bootstrapped_curve = []
+    for p in curve.pillars:
+        bootstrapped_curve.append({
+            "tenor": p["tenor"],
+            "mat_date": p["mat_date"].strftime("%Y-%m-%d"),
+            "par_rate": round(p["rate"], 4),
+            "df": round(p["df"], 6),
+            "zero_rate": round(p["zero_rate"], 4)
+        })
+
+    return {
+        "status": "success",
+        "data": {
+            "currency": "KRW_KOFR",
+            "generator": "\\KRW KOFR Q 3M",
+            "source": snapshot["source"],
+            "status_message": snapshot.get("status_message", "Live"),
+            "is_live_connected": snapshot.get("is_live_connected", False),
+            "has_app_key": snapshot.get("has_app_key", False),
+            "timestamp": snapshot["timestamp"],
+            "epoch_ms": snapshot["epoch_ms"],
+            "pricing_date": curve.pricing_date.strftime("%Y-%m-%d"),
+            "settle_date": curve.settle_date.strftime("%Y-%m-%d"),
+            "quotes": snapshot["quotes"],
+            "curve_pillars": bootstrapped_curve
+        }
+    }
+
+@app.post("/api/kofr/price")
+def price_swap_kofr(req: PricingRequest):
+    r"""Price KRW KOFR OIS Swap matching Murex '\KRW KOFR Q 3M'"""
+    _validate_pricing_request(req)
+    try:
+        snapshot = kofr_feed.get_snapshot()
+        curve = _build_kofr_curve(snapshot, req.pricing_date, req.settle_date)
+        pricer = KOFRSwapPricer(curve)
+        
+        eff_date = parse_date(req.effective_date) if req.effective_date else None
+        mat_date = parse_date(req.maturity_date) if req.maturity_date else None
+        l1_freq = _resolve_freq_months(req.leg1_payment_freq or req.payment_freq, req.leg1_frequency_months or req.frequency_months, 3)
+        l2_freq = _resolve_freq_months(req.leg2_payment_freq or req.payment_freq, req.leg2_frequency_months or req.frequency_months, 3)
+        
+        eff_for_rc = eff_date or (curve.settle_date if hasattr(curve, "settle_date") else datetime.date.today())
+        leg1_sched, leg2_sched = _resolve_custom_schedules(
+            req=req,
+            eff_date=eff_for_rc,
+            default_notional=req.notional if req.notional > 0 else 10_000_000_000.0,
+            default_coupon=req.fixed_coupon_pct or 0.0,
+            default_spread=req.spread_bp or 0.0,
+            currency="KRW_KOFR"
+        )
+
+        result = pricer.price_swap(
+            notional=req.notional if req.notional > 0 else 10_000_000_000.0,
+            position=req.position,
+            fixed_coupon_pct=req.fixed_coupon_pct,
+            spread_bp=req.spread_bp,
+            effective_date=eff_date,
+            maturity_date=mat_date,
+            tenor_str=req.tenor if req.tenor else "1Y",
+            frequency_months=l1_freq,
+            payment_lag_bd=2,   # +2 Business Day Payment Lag
+            day_count=req.leg1_day_count or req.day_count or "Act/365",
+            business_day_conv=req.leg1_business_day_conv or req.business_day_conv or "Modified Following",
+            stub_rule=req.leg1_stub_rule or req.stub_rule or "Short in arrears",
+            adjust_rule=req.leg1_adjust_rule or req.adjust_rule or "Adjust",
+            fix_cal=req.leg2_calendar or req.fix_cal or "SEB",
+            pay_cal=req.leg1_calendar or req.pay_cal or "SEB",
+            fix_day=req.leg2_fix_day if req.leg2_fix_day is not None else (req.fix_day if req.fix_day is not None else 0),
+            custom_schedule=leg1_sched,
+            leg1_custom_schedule=leg1_sched,
+            leg2_custom_schedule=leg2_sched,
+            leg1_frequency_months=l1_freq,
+            leg1_day_count=req.leg1_day_count or req.day_count or "Act/365",
+            leg1_stub_rule=req.leg1_stub_rule or req.stub_rule or "Short in arrears",
+            leg1_business_day_conv=req.leg1_business_day_conv or req.business_day_conv or "Modified Following",
+            leg1_adjust_rule=req.leg1_adjust_rule or req.adjust_rule or "Adjust",
+            leg1_pay_cal=req.leg1_calendar or req.pay_cal or "SEB",
+            leg2_frequency_months=l2_freq,
+            leg2_day_count=req.leg2_day_count or req.day_count or "Act/365",
+            leg2_stub_rule=req.leg2_stub_rule or req.stub_rule or "Short in arrears",
+            leg2_business_day_conv=req.leg2_business_day_conv or req.business_day_conv or "Modified Following",
+            leg2_adjust_rule=req.leg2_adjust_rule or req.adjust_rule or "Adjust",
+            leg2_pay_cal=req.leg2_calendar or req.pay_cal or "SEB",
+            leg2_fix_cal=req.leg2_calendar or req.fix_cal or "SEB",
+            leg2_fix_day=req.leg2_fix_day if req.leg2_fix_day is not None else (req.fix_day if req.fix_day is not None else 0),
+            swap_type=req.crs_swap_type or "Vanilla",
+            usd_fixed_coupon_pct=req.usd_fixed_coupon_pct
+        )
+        
+        result["snapshot_info"] = {
+            "currency": "KRW_KOFR",
+            "generator": "\\KRW KOFR Q 3M",
+            "source": snapshot.get("source", "LSEG Workspace KOFR Feed"),
+            "timestamp": snapshot.get("timestamp", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            "pricing_date": curve.pricing_date.strftime("%Y-%m-%d"),
+            "settle_date": curve.settle_date.strftime("%Y-%m-%d")
+        }
+        
+        return {"status": "success", "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/kofr/reload-and-price")
+def reload_and_price_kofr(req: PricingRequest):
+    """[KOFR ONE-SHOT F9] Reload latest market data and calculate KOFR pricing in a single step"""
+    kofr_feed.trigger_on_demand_refresh()
+    snapshot = kofr_feed.get_snapshot()
+    curve = _build_kofr_curve(snapshot, req.pricing_date, req.settle_date)
+    pricing_res = price_swap_kofr(req)
+    
+    bootstrapped_curve = []
+    for p in curve.pillars:
+        bootstrapped_curve.append({
+            "tenor": p["tenor"],
+            "mat_date": p["mat_date"].strftime("%Y-%m-%d"),
+            "par_rate": round(p["rate"], 4),
+            "df": round(p["df"], 6),
+            "zero_rate": round(p["zero_rate"], 4)
+        })
+
+    market_snapshot = {
+        "currency": "KRW_KOFR",
+        "generator": "\\KRW KOFR Q 3M",
+        "source": snapshot.get("source", "LSEG Workspace KOFR Feed"),
+        "status_message": snapshot.get("status_message", "Live"),
+        "is_live_connected": snapshot.get("is_live_connected", False),
+        "has_app_key": snapshot.get("has_app_key", False),
+        "timestamp": snapshot.get("timestamp", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        "epoch_ms": snapshot.get("epoch_ms", int(time.time() * 1000)),
+        "pricing_date": curve.pricing_date.strftime("%Y-%m-%d"),
+        "settle_date": curve.settle_date.strftime("%Y-%m-%d"),
+        "quotes": snapshot.get("quotes", []),
+        "curve_pillars": bootstrapped_curve
+    }
+    pricing_data = pricing_res.get("data") if isinstance(pricing_res, dict) else pricing_res
+    return {
+        "status": "success",
+        "data": pricing_data,
+        "pricing": pricing_data,
+        "market_snapshot": market_snapshot
+    }
+
+@app.post("/api/kofr/quotes/update")
+def update_manual_quote_kofr(req: QuoteUpdateRequest):
+    kofr_feed.update_quote(req.tenor, req.mid)
+    return {"status": "success", "message": f"KOFR Quote for {req.tenor} updated to {req.mid}%"}
+
+@app.post("/api/kofr/quotes/reset")
+def reset_quotes_kofr():
+    kofr_feed.reset_to_base()
+    return {"status": "success", "message": "All KOFR quotes reset to baseline"}
+
+@app.get("/api/basis/cd-kofr")
+def get_cd_kofr_basis():
+    """Calculate Real-Time CD IRS vs KOFR OIS Basis Spread (bp)"""
+    cd_snap = krw_feed.get_snapshot()
+    kofr_snap = kofr_feed.get_snapshot()
+    
+    cd_map = {q["tenor"]: q["mid"] for q in cd_snap.get("quotes", [])}
+    kofr_map = {q["tenor"]: q["mid"] for q in kofr_snap.get("quotes", [])}
+    
+    basis_table = []
+    check_tenors = ["1Y", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y", "15Y", "20Y", "30Y"]
+    for t in check_tenors:
+        cd_rate = cd_map.get(t)
+        kf_rate = kofr_map.get(t)
+        if cd_rate is not None and kf_rate is not None:
+            basis_bp = round((cd_rate - kf_rate) * 100.0, 2)
+            basis_table.append({
+                "tenor": t,
+                "cd_rate": cd_rate,
+                "kofr_rate": kf_rate,
+                "basis_bp": basis_bp
+            })
+            
+    return {"status": "success", "data": basis_table}
+
+
+# ==============================================================================
+# KRW FX SOFR (CRS) API ENDPOINTS
+# ==============================================================================
+
+@app.get("/api/crs/market-snapshot")
+def get_crs_market_snapshot(pricing_date: Optional[str] = None, settle_date: Optional[str] = None, reload: Optional[bool] = False):
+    """Returns real-time Prebon Yamane CRS Market Data & Calibrated FX SOFR Curve"""
+    if reload:
+        crs_feed.trigger_on_demand_refresh()
+    snap = crs_feed.get_snapshot()
+    p_date = parse_date(pricing_date) if pricing_date else datetime.date.today()
+    s_date = parse_date(settle_date) if settle_date else get_crs_spot_date(p_date, 2)
+    
+    spot_fx = snap.get("spot_fx", 1335.50)
+    quotes = [(q["tenor"], float(q["mid"])) for q in snap.get("quotes", [])]
+    curve = bootstrap_crs_curve(p_date, s_date, quotes, spot_fx)
+    
+    bootstrapped_curve = []
+    for p in curve.pillars:
+        bootstrapped_curve.append({
+            "tenor": p["tenor"],
+            "mat_date": p["mat_date"].strftime("%Y-%m-%d") if hasattr(p["mat_date"], "strftime") else str(p["mat_date"]),
+            "par_rate": round(p["rate"], 4),
+            "df": round(p["df"], 6),
+            "zero_rate": round(p["zero_rate"], 4)
+        })
+        
+    snap["curve_pillars"] = bootstrapped_curve
+    snap["settle_date"] = s_date.strftime("%Y-%m-%d")
+    snap["pricing_date"] = p_date.strftime("%Y-%m-%d")
+    return {"status": "success", "data": snap}
+
+@app.post("/api/crs/price")
+def calculate_price_crs(req: PricingRequest):
+    """Price KRW FX SOFR Cross-Currency Swap matching Reference SwapPricer"""
+    _validate_pricing_request(req)
+    try:
+        snap = crs_feed.get_snapshot()
+        spot_fx = req.spot_fx if (req.spot_fx and req.spot_fx > 0) else snap.get("spot_fx", 1335.50)
+        
+        pricing_date = parse_date(req.pricing_date) if req.pricing_date else datetime.date.today()
+        settle_date = parse_date(req.settle_date) if req.settle_date else get_crs_spot_date(pricing_date, 2)
+        
+        crs_quotes = [(q["tenor"], float(q["mid"])) for q in snap.get("quotes", [])]
+        krw_fx_curve = bootstrap_crs_curve(pricing_date, settle_date, crs_quotes, spot_fx)
+        
+        usd_snap = tradition_feed.get_snapshot()
+        usd_quotes = [(q["tenor"], float(q["mid"])) for q in usd_snap.get("quotes", [])]
+        crs_c_type = (req.curve_type or "").strip().lower()
+        if crs_c_type in ("hedgecurve", "hedge_curve", "hedge"):
+            adv_usd = bootstrap_advanced_sofr_curve(pricing_date, settle_date, usd_quotes)
+            usd_sofr_curve = CompositeSOFRCurve(adv_usd)
+        elif crs_c_type == "advanced":
+            usd_sofr_curve = bootstrap_advanced_sofr_curve(pricing_date, settle_date, usd_quotes)
+        else:
+            usd_sofr_curve = bootstrap_sofr_curve(pricing_date, settle_date, usd_quotes)
+        
+        pricer = KRWFXSOFRSwapPricer(krw_fx_curve, usd_sofr_curve, spot_fx)
+        
+        usd_notional = req.usd_notional if (req.usd_notional and req.usd_notional > 0) else (req.notional if req.notional > 0 else 10_000_000.0)
+        krw_notional = req.krw_notional if (req.krw_notional and req.krw_notional > 0) else usd_notional * spot_fx
+        position_str = req.position if req.position else "Pay KRW Fixed"
+        tenor_str = req.tenor if req.tenor else "5Y"
+        coupon_pct = req.fixed_coupon_pct
+        spread_bp = req.spread_bp
+        payment_lag_bd = req.payment_lag_bd if req.payment_lag_bd is not None else 2
+        
+        l1_freq = _resolve_freq_months(req.leg1_payment_freq or req.payment_freq, req.leg1_frequency_months or req.frequency_months, 6)
+        l2_freq = _resolve_freq_months(req.leg2_payment_freq or req.payment_freq, req.leg2_frequency_months or req.frequency_months, 6)
+        
+        is_fixed_fixed = req.crs_swap_type and ("fixed" in req.crs_swap_type.lower())
+        default_l2_dc = "30/360" if is_fixed_fixed else "Act/360"
+
+        eff_date = parse_date(req.effective_date) if req.effective_date else settle_date
+        mat_date = parse_date(req.maturity_date) if req.maturity_date else None
+        
+        eff_for_rc = eff_date or settle_date
+        leg1_sched, leg2_sched = _resolve_custom_schedules(
+            req=req,
+            eff_date=eff_for_rc,
+            default_notional=req.usd_notional or req.notional or 10_000_000.0,
+            default_coupon=coupon_pct or 0.0,
+            default_spread=spread_bp or 0.0,
+            currency="KRW_CRS"
+        )
+
+        res = pricer.price_swap(
+            usd_notional=usd_notional,
+            krw_notional=krw_notional,
+            spot_fx=spot_fx,
+            position=position_str,
+            fixed_coupon_pct=coupon_pct,
+            spread_bp=spread_bp,
+            effective_date=eff_date,
+            maturity_date=mat_date,
+            tenor_str=tenor_str,
+            frequency_months=l1_freq,
+            payment_lag_bd=payment_lag_bd,
+            day_count_krw=req.leg1_day_count or req.day_count or "30/360",
+            day_count_usd=req.leg2_day_count or default_l2_dc,
+            business_day_conv=req.leg1_business_day_conv or req.business_day_conv or "Modified Following",
+            stub_rule=req.leg1_stub_rule or req.stub_rule or "Short in arrears",
+            adjust_rule=req.leg1_adjust_rule or req.adjust_rule or "Adjust",
+            fix_cal=req.leg2_calendar or req.fix_cal or "SEB_NYB",
+            pay_cal=req.leg1_calendar or req.pay_cal or "SEB_NYB",
+            fix_day=req.leg2_fix_day if req.leg2_fix_day is not None else (req.fix_day if req.fix_day is not None else -1),
+            include_principal_exchange=True,
+            custom_schedule=leg1_sched,
+            leg1_custom_schedule=leg1_sched,
+            leg2_custom_schedule=leg2_sched,
+            swap_type=req.crs_swap_type or "Vanilla",
+            usd_fixed_coupon_pct=req.usd_fixed_coupon_pct,
+            leg1_frequency_months=l1_freq,
+            leg1_day_count=req.leg1_day_count or req.day_count or "30/360",
+            leg1_stub_rule=req.leg1_stub_rule or req.stub_rule or "Short in arrears",
+            leg1_business_day_conv=req.leg1_business_day_conv or req.business_day_conv or "Modified Following",
+            leg1_adjust_rule=req.leg1_adjust_rule or req.adjust_rule or "Adjust",
+            leg1_pay_cal=req.leg1_calendar or req.pay_cal or "SEB_NYB",
+            leg2_frequency_months=l2_freq,
+            leg2_day_count=req.leg2_day_count or default_l2_dc,
+            leg2_stub_rule=req.leg2_stub_rule or req.stub_rule or "Short in arrears",
+            leg2_business_day_conv=req.leg2_business_day_conv or req.business_day_conv or "Modified Following",
+            leg2_adjust_rule=req.leg2_adjust_rule or req.adjust_rule or "Adjust",
+            leg2_pay_cal=req.leg2_calendar or req.pay_cal or "SEB_NYB",
+            leg2_fix_cal=req.leg2_calendar or req.fix_cal or "SEB_NYB",
+            leg2_fix_day=req.leg2_fix_day if req.leg2_fix_day is not None else -1
+        )
+        
+        bootstrapped_curve = []
+        for p in krw_fx_curve.pillars:
+            bootstrapped_curve.append({
+                "tenor": p["tenor"],
+                "mat_date": p["mat_date"].strftime("%Y-%m-%d") if hasattr(p["mat_date"], "strftime") else str(p["mat_date"]),
+                "par_rate": round(p["rate"], 4),
+                "df": round(p["df"], 6),
+                "zero_rate": round(p["zero_rate"], 4)
+            })
+            
+        snap["curve_pillars"] = bootstrapped_curve
+        snap["settle_date"] = settle_date.strftime("%Y-%m-%d")
+        snap["pricing_date"] = pricing_date.strftime("%Y-%m-%d")
+        snap["curve_type"] = req.curve_type or "Standard"
+        snap["swap_type"] = req.crs_swap_type or "Vanilla"
+        
+        return {
+            "status": "success",
+            "market_snapshot": snap,
+            "data": {
+                "market_snapshot": snap,
+                "pricing_results": res["pricing_results"],
+                "schedules": res["schedules"],
+                "principal_flows": res["principal_flows"],
+                "key_rate_deltas": res["key_rate_deltas"],
+                "hedge_key_rate_deltas": res.get("hedge_key_rate_deltas"),
+                "krw_key_rate_deltas": res.get("krw_key_rate_deltas"),
+                "curve_pillars": bootstrapped_curve,
+                "details": {
+                    "effective_date": res["effective_date"],
+                    "maturity_date": res["maturity_date"],
+                    "tenor": res["tenor"],
+                    "spot_fx": res["spot_fx"],
+                    "usd_notional": res["usd_notional"],
+                    "krw_notional": res["krw_notional"],
+                    "position": res["position"],
+                    "fixed_coupon_pct": res["fixed_coupon_pct"],
+                    "spread_bp": spread_bp,
+                    "swap_type": req.crs_swap_type or "Vanilla",
+                    "usd_fixed_coupon_pct": req.usd_fixed_coupon_pct,
+                    "curve_type": req.curve_type or "Standard"
+                }
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/crs/reload-and-price")
+def reload_and_price_crs(req: PricingRequest):
+    """Refreshes live quotes and recalculates pricing in one atomic shot"""
+    crs_feed.trigger_on_demand_refresh()
+    snap = crs_feed.get_snapshot()
+    pricing_res = calculate_price_crs(req)
+    
+    p_date = parse_date(req.pricing_date) if req.pricing_date else datetime.date.today()
+    s_date = parse_date(req.settle_date) if req.settle_date else get_crs_spot_date(p_date, 2)
+    spot_fx = snap.get("spot_fx", 1335.50)
+    quotes = [(q["tenor"], float(q["mid"])) for q in snap.get("quotes", [])]
+    curve = bootstrap_crs_curve(p_date, s_date, quotes, spot_fx)
+    
+    bootstrapped_curve = []
+    for p in curve.pillars:
+        bootstrapped_curve.append({
+            "tenor": p["tenor"],
+            "mat_date": p["mat_date"].strftime("%Y-%m-%d") if hasattr(p["mat_date"], "strftime") else str(p["mat_date"]),
+            "par_rate": round(p["rate"], 4),
+            "df": round(p["df"], 6),
+            "zero_rate": round(p["zero_rate"], 4)
+        })
+        
+    snap_copy = dict(snap)
+    snap_copy["curve_pillars"] = bootstrapped_curve
+    snap_copy["settle_date"] = s_date.strftime("%Y-%m-%d")
+    snap_copy["pricing_date"] = p_date.strftime("%Y-%m-%d")
+
+    pricing_data = pricing_res.get("data") if isinstance(pricing_res, dict) else pricing_res
+    return {
+        "status": "success",
+        "data": pricing_data,
+        "pricing": pricing_data,
+        "market_snapshot": snap_copy
+    }
+
+@app.post("/api/crs/quotes/update")
+def update_quote_crs(req: QuoteUpdateRequest):
+    crs_feed.update_quote_manually(req.tenor, req.mid, req.bid, req.ask)
+    return {"status": "success", "message": f"Prebon CRS {req.tenor} updated manually"}
+
+@app.post("/api/crs/quotes/reset")
+def reset_quotes_crs():
+    crs_feed.reset_quotes()
+    return {"status": "success", "message": "All Prebon CRS quotes reset to baseline"}
+
+MAX_TERMSHEET_BYTES = 20 * 1024 * 1024
+
+
+@app.get("/api/termsheet/status")
+def termsheet_status():
+    """Tell the dashboard whether term sheet extraction is available."""
+    from server.termsheet import extraction_status
+    return {"status": "success", "data": extraction_status()}
+
+
+@app.post("/api/termsheet/extract")
+async def extract_termsheet(file: UploadFile = File(...)):
+    """
+    Read a termsheet, return a draft ticket for the trader to review.
+
+    The document is held in memory only: identity is stripped before anything is sent
+    out, and the bytes are dropped when this call returns. Nothing is written to disk.
+    """
+    from server.termsheet import process_termsheet
+
+    name = (file.filename or "").lower()
+    if not name.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="PDF 파일만 지원합니다")
+
+    raw = await file.read()
+    try:
+        if not raw:
+            raise HTTPException(status_code=400, detail="빈 파일입니다")
+        if len(raw) > MAX_TERMSHEET_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"파일이 너무 큽니다 ({len(raw)/1024/1024:.1f}MB). 최대 20MB까지 지원합니다"
+            )
+        try:
+            result = process_termsheet(raw)
+        except HTTPException:
+            raise
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"터미시트 추출 실패: {e}")
+        return {"status": "success", "data": result}
+    finally:
+        del raw
+        await file.close()
+
+
+@app.post("/api/rollercoaster/parse-paste")
+def parse_rollercoaster_endpoint(req: RollercoasterParseRequest):
+    """Parses pasted Excel text into normalized rollercoaster swap periods for preview & pricing (supports Leg 1 and Leg 2)"""
+    eff_d = parse_date(req.effective_date) if req.effective_date else datetime.date.today()
+    def_notional = req.notional or 100_000_000.0
+    def_coupon = req.fixed_coupon_pct or 0.0
+    def_spread = req.spread_bp or 0.0
+    curr = req.currency or "USD"
+
+    parsed_leg1 = []
+    parsed_leg2 = []
+
+    text1 = req.leg1_raw_paste_text or req.raw_paste_text
+    if text1 and text1.strip():
+        parsed_leg1 = parse_rollercoaster_paste(
+            raw_text=text1,
+            effective_date=eff_d,
+            default_notional=def_notional,
+            default_coupon_pct=def_coupon,
+            default_spread_bp=def_spread,
+            currency=curr
+        )
+
+    text2 = req.leg2_raw_paste_text or req.raw_paste_text
+    if text2 and text2.strip():
+        parsed_leg2 = parse_rollercoaster_paste(
+            raw_text=text2,
+            effective_date=eff_d,
+            default_notional=def_notional,
+            default_coupon_pct=def_coupon,
+            default_spread_bp=def_spread,
+            currency=curr
+        )
+
+    return {
+        "status": "success",
+        "data": parsed_leg1 if parsed_leg1 else parsed_leg2,
+        "data_leg1": parsed_leg1,
+        "data_leg2": parsed_leg2,
+        "count_leg1": len(parsed_leg1),
+        "count_leg2": len(parsed_leg2),
+        "count": max(len(parsed_leg1), len(parsed_leg2))
+    }
+
+
+# ==============================================================================
+# FORWARD SWAP POINT PRICER API ENDPOINTS (KMBC & CIP Hybrid Model)
+# ==============================================================================
+
+_CURVE_CACHE: Dict[Any, Any] = {}
+
+def get_cached_sofr_curve(p_date: datetime.date, s_date: datetime.date, usd_quotes: List[Tuple[str, float]]) -> SOFRCurve:
+    key = ("USD_SOFR", p_date, s_date, tuple(usd_quotes))
+    if key in _CURVE_CACHE:
+        return _CURVE_CACHE[key]
+    curve = bootstrap_sofr_curve(p_date, s_date, usd_quotes)
+    _CURVE_CACHE[key] = curve
+    return curve
+
+def get_cached_crs_curve(p_date: datetime.date, s_date: datetime.date, crs_quotes: List[Tuple[str, float]], spot_fx: float) -> KRWFXSOFRCurve:
+    key = ("KRW_CRS", p_date, s_date, tuple(crs_quotes), round(spot_fx, 2))
+    if key in _CURVE_CACHE:
+        return _CURVE_CACHE[key]
+    curve = bootstrap_crs_curve(p_date, s_date, crs_quotes, spot_fx)
+    _CURVE_CACHE[key] = curve
+    return curve
+
+@app.get("/api/fwd/market-snapshot")
+def get_fwd_market_snapshot(pricing_date: Optional[str] = None, reload: Optional[bool] = False):
+    """Returns KMBC USD/KRW Swap Points, Spot FX (KRW=), and calibrated discount curves for Forward pricing"""
+    if reload:
+        try:
+            kmbc_fwd_feed.trigger_on_demand_refresh()
+        except Exception as e:
+            print(f"[KMBC SNAPSHOT ERROR] On-demand refresh error: {e}")
+    snap_kmbc = kmbc_fwd_feed.get_snapshot()
+    snap_crs = crs_feed.get_snapshot()
+    snap_usd = tradition_feed.get_snapshot()
+    
+    p_date = parse_date(pricing_date) if pricing_date else datetime.date.today()
+    s_date = add_business_days(p_date, 2, "SEB_NYB")
+    
+    spot_fx = snap_kmbc.get("spot_fx", 1357.85)
+    crs_quotes = [(q["tenor"], float(q["mid"])) for q in snap_crs.get("quotes", [])]
+    krw_fx_curve = get_cached_crs_curve(p_date, s_date, crs_quotes, spot_fx)
+    
+    usd_quotes = [(q["tenor"], float(q["mid"])) for q in snap_usd.get("quotes", [])]
+    usd_sofr_curve = get_cached_sofr_curve(p_date, s_date, usd_quotes)
+    
+    kmbc_q_list = snap_kmbc.get("quotes", [])
+    pricer = FwdSwapPricer(krw_fx_curve, usd_sofr_curve, spot_fx, p_date, calendar="SEB_NYB", kmbc_quotes=kmbc_q_list)
+    
+    # Generate full hybrid USD/KRW forward swap points curve (1W to 20Y)
+    kmbc_q_map = {q["tenor"]: q for q in kmbc_q_list}
+    std_tenors = ["1W", "2W", "1M", "2M", "3M", "6M", "9M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y", "12Y", "15Y", "20Y"]
+    hybrid_quotes = []
+    
+    for t in std_tenors:
+        leg = pricer.price_single_leg(maturity=t, notional_usd=10_000_000.0, margin_bp=0.0)
+        sp_won = leg["sp_theo"]
+        sp_jeon = round(sp_won * 100.0, 2)
+        
+        if t in kmbc_q_map:
+            q_kmbc = kmbc_q_map[t]
+            hybrid_quotes.append({
+                "tenor": t,
+                "ric": q_kmbc.get("ric", f"KRW{t}=KMBC"),
+                "type": "KMBC (Live)",
+                "bid": q_kmbc.get("bid"),
+                "ask": q_kmbc.get("ask"),
+                "mid": q_kmbc.get("mid"),
+                "bid_krw": q_kmbc.get("bid_krw"),
+                "ask_krw": q_kmbc.get("ask_krw"),
+                "mid_krw": q_kmbc.get("mid_krw", sp_won),
+                "source": "KMBC",
+                "maturity": leg["maturity"],
+                "days": leg["days_from_spot"],
+                "fwd_theo": round(leg["fwd_theo"], 4),
+                "df_usd": round(leg["df_usd"], 6),
+                "df_krw": round(leg["df_krw"], 6)
+            })
+        else:
+            # CIP DF Inverse for > 1Y (Simplified RIC as '-')
+            hybrid_quotes.append({
+                "tenor": t,
+                "ric": "-",
+                "type": "CIP (DF 역산)",
+                "bid": None,
+                "ask": None,
+                "mid": sp_jeon,
+                "bid_krw": None,
+                "ask_krw": None,
+                "mid_krw": round(sp_won, 4),
+                "source": "CIP_Inverse",
+                "maturity": leg["maturity"],
+                "days": leg["days_from_spot"],
+                "fwd_theo": round(leg["fwd_theo"], 4),
+                "df_usd": round(leg["df_usd"], 6),
+                "df_krw": round(leg["df_krw"], 6)
+            })
+        
+    return {
+        "status": "success",
+        "data": {
+            "currency": "USD_FWD",
+            "source": "KMBC (<=1Y) + CIP DF Inverse (>1Y) Hybrid Term Structure",
+            "pricing_date": p_date.strftime("%Y-%m-%d"),
+            "spot_date": s_date.strftime("%Y-%m-%d"),
+            "spot_fx": spot_fx,
+            "spot_fx_bid": snap_kmbc.get("spot_fx_bid", spot_fx - 0.20),
+            "spot_fx_ask": snap_kmbc.get("spot_fx_ask", spot_fx + 0.20),
+            "spot_fx_tick": snap_kmbc.get("spot_fx_tick", "Init"),
+            "is_connected": snap_kmbc.get("is_connected", False),
+            "status_message": snap_kmbc.get("status_message", "Live KMBC & CIP Hybrid Curves"),
+            "timestamp": snap_kmbc.get("timestamp", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            "calendar": "SEB_NYB",
+            "kmbc_quotes": hybrid_quotes,
+            "quotes": hybrid_quotes,
+            "standard_swap_points": hybrid_quotes
+        }
+    }
+
+@app.post("/api/fwd/price")
+def calculate_price_fwd(req: FwdPricingRequest):
+    """Price Far Leg schedule pasted by Trader with Margin and CIP calculations"""
+    try:
+        snap_kmbc = kmbc_fwd_feed.get_snapshot()
+        snap_crs = crs_feed.get_snapshot()
+        snap_usd = tradition_feed.get_snapshot()
+        
+        spot_fx = req.spot_fx if (req.spot_fx and req.spot_fx > 0) else snap_kmbc.get("spot_fx", 1357.85)
+        p_date = parse_date(req.pricing_date) if req.pricing_date else datetime.date.today()
+        cal_code = req.calendar if req.calendar else "SEB_NYB"
+        s_date = add_business_days(p_date, 2, cal_code)
+        
+        crs_quotes = [(q["tenor"], float(q["mid"])) for q in snap_crs.get("quotes", [])]
+        krw_fx_curve = get_cached_crs_curve(p_date, s_date, crs_quotes, spot_fx)
+        
+        usd_quotes = [(q["tenor"], float(q["mid"])) for q in snap_usd.get("quotes", [])]
+        usd_sofr_curve = get_cached_sofr_curve(p_date, s_date, usd_quotes)
+        
+        kmbc_q_list = snap_kmbc.get("quotes", [])
+        pricer = FwdSwapPricer(krw_fx_curve, usd_sofr_curve, spot_fx, p_date, cal_code, kmbc_quotes=kmbc_q_list)
+        
+        # 1. Parse default margin bp allowing 0.0
+        def_margin = float(req.default_margin_bp) if req.default_margin_bp is not None else 0.0
+
+        # 2. Parse raw text paste if provided
+        far_legs = req.far_legs or []
+        if req.raw_paste_text and req.raw_paste_text.strip():
+            pasted_legs = parse_trader_paste_text(req.raw_paste_text, def_margin)
+            if pasted_legs:
+                far_legs = pasted_legs
+                
+        # If still empty, provide sample default tranches
+        if not far_legs:
+            far_legs = [
+                {"maturity": "2026-11-30", "notional_usd": 1_648_000.0, "margin_bp": def_margin},
+                {"maturity": "2027-02-26", "notional_usd": 1_676_000.0, "margin_bp": def_margin},
+                {"maturity": "2027-05-28", "notional_usd": 3_353_000.0, "margin_bp": def_margin},
+                {"maturity": "2027-07-28", "notional_usd": 1_649_000.0, "margin_bp": def_margin},
+                {"maturity": "2027-11-30", "notional_usd": 1_677_000.0, "margin_bp": def_margin},
+                {"maturity": "2028-01-31", "notional_usd": 1_676_000.0, "margin_bp": def_margin}
+            ]
+            
+        result = pricer.price_portfolio(far_legs, default_margin_bp=def_margin)
+        return {"status": "success", "data": result}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/fwd/parse-paste")
+def parse_paste_endpoint(req: FwdPricingRequest):
+    """Parses trader's pasted Excel text [Maturity, Notional USD, Margin bp] into JSON legs"""
+    def_margin = float(req.default_margin_bp) if req.default_margin_bp is not None else 0.0
+    pasted = parse_trader_paste_text(req.raw_paste_text or "", def_margin)
+    return {"status": "success", "data": pasted}
+
+@app.post("/api/fwd/reload-and-price")
+def reload_and_price_fwd(req: FwdPricingRequest):
+    """[FWD ONE-SHOT F9] Reload latest KMBC market feed and calculate FWD pricing in a single step"""
+    try:
+        kmbc_fwd_feed.trigger_on_demand_refresh()
+    except Exception:
+        pass
+    pricing_res = calculate_price_fwd(req)
+    snap_res = get_fwd_market_snapshot(pricing_date=None, reload=False)
+    pricing_data = pricing_res.get("data") if isinstance(pricing_res, dict) else pricing_res
+    snap_data = snap_res.get("data") if isinstance(snap_res, dict) else snap_res
+    return {
+        "status": "success",
+        "data": pricing_data,
+        "pricing": pricing_data,
+        "market_snapshot": snap_data
+    }
+
+@app.post("/api/fwd/quotes/update")
+def update_quote_fwd(req: QuoteUpdateRequest):
+    """Update manual KMBC swap point quote or Spot FX"""
+    updated = kmbc_fwd_feed.update_quote(req.tenor, req.mid)
+    return {"status": "success", "message": f"KMBC Quote for {req.tenor} updated to {req.mid}"}
+
+@app.post("/api/fwd/quotes/reset")
+def reset_quotes_fwd():
+    """Reset KMBC swap point quotes to baseline"""
+    kmbc_fwd_feed.reset_quotes()
+    return {"status": "success", "message": "All KMBC quotes reset to baseline"}
+
+
+# ==============================================================================
+# CALENDAR MANAGEMENT & AUTOMATED DAILY UPDATE APIS
+# ==============================================================================
+from server.calendar_manager import (
+    get_calendar_status, reload_holidays, add_holiday
+)
+from server.holiday_updater import holiday_updater_service
+
+class HolidayAddRequest(BaseModel):
+    cal_code: str = "SEB"
+    date_str: str # 'YYYY-MM-DD'
+
+@app.on_event("startup")
+async def calendar_startup_event():
+    # Start the automated daily holiday updater scheduler in background (runs at 00:05 KST)
+    asyncio.create_task(holiday_updater_service.start_daily_scheduler(run_at_hour=0, run_at_minute=5))
+
+@app.get("/api/calendar/status")
+def get_calendar_info():
+    """Retrieve status of all 18 holiday calendars including holiday counts and last reload time"""
+    status = get_calendar_status()
+    status["updater_status"] = {
+        "last_sync_time": holiday_updater_service.last_sync_time,
+        "last_sync_source": holiday_updater_service.last_sync_source,
+        "is_scheduler_active": holiday_updater_service.is_running_scheduler
+    }
+    return {"status": "success", "data": status}
+
+@app.post("/api/calendar/reload")
+def trigger_calendar_reload():
+    """Force reload holidays_data.json into memory cache with zero downtime"""
+    status = reload_holidays()
+    return {"status": "success", "message": "Holidays successfully reloaded into memory cache", "data": status}
+
+@app.post("/api/calendar/sync")
+def trigger_calendar_sync(source: str = "lseg"):
+    """Trigger immediate calendar update from configured daily sync source (lseg, murex, statutory, auto)"""
+    src = source.lower()
+    if src in ("lseg", "auto"):
+        res = holiday_updater_service.sync_from_lseg_api()
+        if not res.get("success") and src == "auto":
+            if os.path.exists(holiday_updater_service.murex_export_path):
+                res = holiday_updater_service.sync_from_murex_export()
+            else:
+                res = holiday_updater_service.sync_statutory_korean_holidays()
+    elif src == "murex":
+        res = holiday_updater_service.sync_from_murex_export()
+    else:
+        res = holiday_updater_service.sync_statutory_korean_holidays()
+    return {"status": "success", "data": res}
+
+@app.post("/api/calendar/add-holiday")
+def add_custom_holiday(req: HolidayAddRequest):
+    """Dynamically register a new holiday for any calendar (persisted to holidays_data.json)"""
+    ok = add_holiday(req.cal_code, req.date_str, persist=True)
+    if ok:
+        return {"status": "success", "message": f"Holiday {req.date_str} added to {req.cal_code.upper()} calendar"}
+    raise HTTPException(status_code=500, detail="Failed to persist holiday")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(status_code=204)
+
+# ==============================================================================
+# STATIC DASHBOARD MOUNT
+# ==============================================================================
+static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static"))
+os.makedirs(static_dir, exist_ok=True)
+app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("server.app:app", host="127.0.0.1", port=8000, reload=True)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
