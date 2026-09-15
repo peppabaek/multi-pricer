@@ -33,9 +33,13 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "key_env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
         "model_env": "GEMINI_MODEL",
         "default_model": "gemini-2.0-flash",
-        "cost": "free tier",
-        "free_limits": "분당 15회 · 일 1,500회 (무료)",
-        "data_policy": "무료 티어는 제품 개선에 사용될 수 있음 · 유료 전환 시 미사용",
+        "tier_env": "GEMINI_TIER",
+        "cost": {"free": "free tier", "paid": "paid"},
+        "free_limits": "분당 15회 · 일 1,500회 (무료 티어)",
+        "data_policy": {
+            "free": "무료 티어는 제품 개선에 사용될 수 있음",
+            "paid": "유료 티어 — 학습 미사용 (Google 유료 서비스 약관)",
+        },
         "signup": "https://aistudio.google.com/apikey",
     },
     "groq": {
@@ -45,9 +49,13 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "default_model": "llama-3.3-70b-versatile",
         "base_url": "https://api.groq.com/openai/v1",
         "openai_compatible": True,
-        "cost": "free tier",
-        "free_limits": "분당 30회 · 일 14,400회 (무료)",
-        "data_policy": "무료 티어 약관 확인 필요",
+        "tier_env": "GROQ_TIER",
+        "cost": {"free": "free tier", "paid": "paid"},
+        "free_limits": "분당 30회 · 일 14,400회 (무료 티어)",
+        "data_policy": {
+            "free": "무료 티어 약관 확인 필요",
+            "paid": "유료 티어 — 학습 미사용",
+        },
         "signup": "https://console.groq.com/keys",
     },
     "openai": {
@@ -73,6 +81,30 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "signup": "https://ollama.com/download",
     },
 }
+
+
+def resolve_tier(name: str) -> str:
+    """
+    Which billing tier this provider is on here.
+
+    It changes what the vendor may do with the text, so it is declared rather than
+    guessed, and defaults to the conservative reading: assume free-tier terms until
+    someone says otherwise.
+    """
+    spec = PROVIDERS.get(name, {})
+    env = spec.get("tier_env")
+    if env:
+        v = (os.environ.get(env) or "").strip().lower()
+        if v in ("paid", "pay", "billing", "enterprise"):
+            return "paid"
+        if v in ("free", "trial"):
+            return "free"
+    return "free" if isinstance(spec.get("cost"), dict) else "paid"
+
+
+def _pick(value, tier: str):
+    """Registry fields may vary by tier."""
+    return value.get(tier, next(iter(value.values()))) if isinstance(value, dict) else value
 
 
 def resolve_key(name: str) -> Optional[str]:
@@ -121,12 +153,14 @@ def describe() -> List[Dict[str, Any]]:
     """What the dashboard shows when asked which models can run."""
     out = []
     for name, spec in PROVIDERS.items():
+        tier = resolve_tier(name)
         out.append({
             "name": name,
             "label": spec["label"],
-            "cost": spec["cost"],
-            "free_limits": spec.get("free_limits"),
-            "data_policy": spec["data_policy"],
+            "tier": tier,
+            "cost": _pick(spec["cost"], tier),
+            "free_limits": spec.get("free_limits") if tier == "free" else None,
+            "data_policy": _pick(spec["data_policy"], tier),
             "model": resolve_model(name),
             "available": is_available(name),
             "signup": spec["signup"],

@@ -69,26 +69,25 @@ def main():
 
     rows = describe()
     w = max(len(r["label"]) for r in rows)
-    print(f"\n  {'프로바이더':<{w}}  {'비용':<11} {'키':<6} {'무료 한도':<26} {'점검'}")
-    print(f"  {'-'*w}  {'-'*11} {'-'*6} {'-'*26} {'-'*12}")
+    print(f"\n  {'프로바이더':<{w}}  {'티어':<6} {'키':<6} {'한도':<26} {'점검'}")
+    print(f"  {'-'*w}  {'-'*6} {'-'*6} {'-'*26} {'-'*12}")
     for r in rows:
         key = "있음" if r["available"] else "없음"
         chk = probe(r["name"]) if (do_probe and r["available"]) else ("-" if r["available"] else "")
-        print(f"  {r['label']:<{w}}  {r['cost']:<11} {key:<6} "
+        tier = "유료" if r["tier"] == "paid" else "무료"
+        print(f"  {r['label']:<{w}}  {tier:<6} {key:<6} "
               f"{(r['free_limits'] or '-'):<26} {chk}")
 
     print("\n  데이터 취급")
     for r in rows:
         print(f"    {r['label']:<{w}}  {r['data_policy']}")
 
-    ready_free = [r for r in rows if r["available"] and r["cost"].startswith("free")]
-    if not ready_free:
+    ready = [r for r in rows if r["available"]]
+    if len(ready) >= 2:
+        print(f"\n  준비된 프로바이더 {len(ready)}개 — 교차검증 가능: "
+              + ", ".join(r["label"] for r in ready))
+    elif not any(r["available"] and r["tier"] == "free" for r in rows):
         print(FREE_PAIR_HINT)
-    else:
-        names = ", ".join(r["label"] for r in ready_free)
-        print(f"\n  사용 가능한 무료 프로바이더: {names}")
-        if len(ready_free) >= 2:
-            print("  → 두 개 이상 준비됨. 교차검증을 무료로 돌릴 수 있습니다.")
 
     print("\n  키 발급")
     for r in rows:
