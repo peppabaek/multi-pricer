@@ -47,25 +47,40 @@ load_env_file()
 
 
 def extraction_status() -> Dict[str, Any]:
-    """Whether termsheet extraction can run, and how to enable it if not."""
+    """Whether extraction can run, on which provider, and how to enable it if not."""
     load_env_file()
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if key:
-        return {
-            "ready": True,
-            "model": MODEL,
-            "key_source": "environment" if not os.path.exists(_ENV_FILE) else ".env / environment",
-            "key_hint": f"{key[:7]}…{key[-4:]}" if len(key) > 14 else "set",
-        }
-    return {
-        "ready": False,
-        "model": MODEL,
-        "reason": "ANTHROPIC_API_KEY가 설정되지 않았습니다",
-        "how_to": [
-            f"{_ENV_FILE} 파일에 ANTHROPIC_API_KEY=sk-ant-... 한 줄을 추가하고 서버를 재시작하세요",
-            "또는 환경변수로 설정: setx ANTHROPIC_API_KEY \"sk-ant-...\"",
-        ],
+    from server.providers import PROVIDERS, describe, is_available, resolve_model
+
+    primary = os.environ.get("TERMSHEET_PROVIDER", "anthropic").strip().lower()
+    second = os.environ.get("TERMSHEET_SECOND_PROVIDER", "").strip().lower()
+    known = primary in PROVIDERS
+    ready = known and is_available(primary)
+
+    out: Dict[str, Any] = {
+        "ready": ready,
+        "provider": primary,
+        "provider_label": PROVIDERS[primary]["label"] if known else primary,
+        "model": resolve_model(primary) if known else None,
+        "cross_check": bool(second and second in PROVIDERS and is_available(second)),
+        "second_provider": second or None,
+        "providers": describe(),
     }
+    if not ready:
+        if not known:
+            out["reason"] = f"TERMSHEET_PROVIDER={primary!r} 는 지원하지 않습니다"
+        else:
+            envs = " 또는 ".join(PROVIDERS[primary]["key_env"]) or "(키 불필요)"
+            out["reason"] = f"{PROVIDERS[primary]['label']} 키가 없습니다 ({envs})"
+            out["how_to"] = [
+                f"{_ENV_FILE} 에 {envs} 를 추가하고 서버를 재시작하세요",
+                f"발급: {PROVIDERS[primary]['signup']}",
+            ]
+        free = [p["name"] for p in out["providers"]
+                if p["cost"].startswith("free") and p["available"]]
+        if free:
+            out["free_available"] = free
+    return out
+
 
 # Conventions the pricer actually understands (server/calendar_manager.py).
 DAY_COUNTS = ["Act/365", "Act/360", "30/360", "Act/Act"]
@@ -436,46 +451,44 @@ def _match_synthetic_sample(text: str) -> Optional[ExtractedTrade]:
 
 
 # ---------------------------------------------------------------- 4. model call
-def call_extractor(redacted_text: str, model: str = MODEL) -> ExtractedTrade:
+def primary_provider() -> str:
+    """Which model reads the document first. Any provider in the registry will do."""
+    return os.environ.get("TERMSHEET_PROVIDER", "anthropic").strip().lower()
+
+
+def call_extractor(redacted_text: str, model: str = None) -> ExtractedTrade:
     load_env_file()
-    import anthropic
+    from server.providers import get_extractor, PROVIDERS, is_available
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    name = primary_provider()
+    if name not in PROVIDERS:
+        raise ValueError(f"TERMSHEET_PROVIDER={name!r} 는 지원하지 않습니다 "
+                         f"(사용 가능: {', '.join(PROVIDERS)})")
+    if not is_available(name):
+        envs = " 또는 ".join(PROVIDERS[name]["key_env"]) or "(키 불필요)"
         raise ValueError(
-            "ANTHROPIC_API_KEY가 설정되지 않아 Term Sheet 분석을 실행할 수 없습니다. "
-            f"{_ENV_FILE} 에 키를 추가한 뒤 서버를 재시작하세요."
-        )
+            f"{PROVIDERS[name]['label']} 키가 없어 Term Sheet 분석을 실행할 수 없습니다. "
+            f"{_ENV_FILE} 에 {envs} 를 추가하세요. "
+            f"발급: {PROVIDERS[name]['signup']}")
 
-    client = anthropic.Anthropic()
     try:
-        response = client.messages.parse(
-            model=model,
-            max_tokens=16000,
-            output_config={"effort": "high"},
-            system=[{
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }],
-            messages=[{
-                "role": "user",
-                "content": f"Extract the trade terms from this termsheet.\n\n{redacted_text}",
-            }],
-            output_format=ExtractedTrade,
-        )
-        return response.parsed_output
+        return get_extractor(name)(redacted_text)
     except Exception as e:
-        err_str = str(e)
-        if "credit balance is too low" in err_str.lower():
+        err = str(e).lower()
+        if "credit balance is too low" in err or "insufficient_quota" in err:
             if demo_mode_enabled():
                 sample = _match_synthetic_sample(redacted_text)
                 if sample:
                     sample.demo_fallback = True
                     return sample
             raise ValueError(
-                "Anthropic API 잔액(Credit Balance)이 부족하여 분석을 완료하지 못했습니다. "
-                "Anthropic Console (https://console.anthropic.com/settings/billing) 에서 크레딧을 충전해주세요."
-            )
+                f"{PROVIDERS[name]['label']} 잔액이 부족하여 분석을 완료하지 못했습니다. "
+                f"크레딧을 충전하거나, 무료 프로바이더로 전환하세요 "
+                f"(.env 에 TERMSHEET_PROVIDER=gemini 등).")
+        if "rate limit" in err or "429" in err or "quota" in err:
+            raise ValueError(
+                f"{PROVIDERS[name]['label']} 호출 한도에 걸렸습니다. "
+                f"잠시 후 다시 시도하거나 다른 프로바이더로 전환하세요.")
         raise
 
 

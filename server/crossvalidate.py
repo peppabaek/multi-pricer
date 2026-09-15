@@ -295,151 +295,28 @@ DEFAULT_SECOND_MODEL = "claude-opus-5"
 
 
 def secondary_reviewer() -> Optional[Callable[[str, str], Dict[str, Dict[str, Any]]]]:
-    provider = os.environ.get("TERMSHEET_SECOND_PROVIDER", "").strip().lower()
-    if provider == "anthropic":
-        def review(redacted_text: str, disputes: str):
-            import anthropic
-            from server.termsheet import SYSTEM_PROMPT
-            client = anthropic.Anthropic()
-            resp = client.messages.parse(
-                model=os.environ.get(SECOND_MODEL_ENV, DEFAULT_SECOND_MODEL),
-                max_tokens=8000,
-                system=[{"type": "text", "text": SYSTEM_PROMPT,
-                         "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user",
-                           "content": f"{REVIEW_PROMPT.format(disputes=disputes)}"
-                                      f"\n\nDocument:\n\n{redacted_text}"}],
-                output_format=ReviewSet)
-            return {r.field: r.model_dump() for r in resp.parsed_output.reviews}
-        return review
-    if provider == "gemini":
-        def review(redacted_text: str, disputes: str):
-            import google.generativeai as genai
-            from server.termsheet import SYSTEM_PROMPT
-            genai.configure(api_key=os.environ.get("GEMINI_API_KEY")
-                            or os.environ.get("GOOGLE_API_KEY"))
-            model = genai.GenerativeModel(
-                os.environ.get("GEMINI_MODEL", "gemini-2.0-flash"),
-                system_instruction=SYSTEM_PROMPT)
-            r = model.generate_content(
-                f"{REVIEW_PROMPT.format(disputes=disputes)}\n\nDocument:\n\n{redacted_text}",
-                generation_config={"response_mime_type": "application/json",
-                                   "response_schema": ReviewSet.model_json_schema()})
-            return {x.field: x.model_dump()
-                    for x in ReviewSet.model_validate_json(r.text).reviews}
-        return review
-    if provider == "openai":
-        def review(redacted_text: str, disputes: str):
-            from openai import OpenAI
-            from server.termsheet import SYSTEM_PROMPT
-            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-            c = client.beta.chat.completions.parse(
-                model=os.environ.get("OPENAI_MODEL", "gpt-4o-2024-08-06"),
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",
-                     "content": f"{REVIEW_PROMPT.format(disputes=disputes)}"
-                                f"\n\nDocument:\n\n{redacted_text}"},
-                ],
-                response_format=ReviewSet)
-            return {x.field: x.model_dump() for x in c.choices[0].message.parsed.reviews}
-        return review
-    return None
+    """Second-round reviewer for whichever provider is configured as the cross-check."""
+    from server.providers import get_reviewer
+    name = os.environ.get("TERMSHEET_SECOND_PROVIDER", "").strip().lower()
+    if not name:
+        return None
+    return get_reviewer(name, SECOND_MODEL_ENV)
 
 
 # ---------------------------------------------------------------- providers
 def secondary_extractor() -> Optional[Callable[[str], Any]]:
     """
-    The second opinion, if one is configured. Provider-agnostic on purpose: whichever
-    vendor is approved, it only has to return an ExtractedTrade.
+    The second opinion, if one is configured.
 
-    Returns None when no second provider is set up, and the pipeline runs single-model.
+    Any provider in the registry can fill this slot, so a free tier on one vendor can
+    cross-check a free tier on another and the pair costs nothing to run.
     """
-    provider = os.environ.get("TERMSHEET_SECOND_PROVIDER", "").strip().lower()
-    if not provider:
+    from server.providers import get_extractor, PROVIDERS
+
+    name = os.environ.get("TERMSHEET_SECOND_PROVIDER", "").strip().lower()
+    if not name:
         return None
-    if provider == "anthropic":
-        return _anthropic_extractor()
-    if provider == "gemini":
-        return _gemini_extractor()
-    if provider == "openai":
-        return _openai_extractor()
-    raise ValueError(f"알 수 없는 TERMSHEET_SECOND_PROVIDER: {provider!r}")
-
-
-def _anthropic_extractor():
-    """
-    Second opinion from a different Claude model on the same key.
-
-    Weaker than a different vendor - shared training lineage means some blind spots are
-    shared - but it is a genuine second reading with different failure modes, it needs no
-    new vendor relationship, and the document goes nowhere it is not already going.
-    """
-    def extract(redacted_text: str):
-        import anthropic
-        from server.termsheet import SYSTEM_PROMPT, ExtractedTrade
-
-        client = anthropic.Anthropic()
-        resp = client.messages.parse(
-            model=os.environ.get(SECOND_MODEL_ENV, DEFAULT_SECOND_MODEL),
-            max_tokens=16000,
-            system=[{"type": "text", "text": SYSTEM_PROMPT,
-                     "cache_control": {"type": "ephemeral"}}],
-            messages=[{"role": "user",
-                       "content": "Extract the trade terms from this termsheet.\n\n"
-                                  + redacted_text}],
-            output_format=ExtractedTrade,
-        )
-        return resp.parsed_output
-
-    return extract
-
-
-def _gemini_extractor():
-    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not key:
-        raise ValueError("TERMSHEET_SECOND_PROVIDER=gemini 인데 GEMINI_API_KEY가 없습니다")
-
-    def extract(redacted_text: str):
-        import google.generativeai as genai
-        from server.termsheet import SYSTEM_PROMPT, ExtractedTrade
-
-        genai.configure(api_key=key)
-        model = genai.GenerativeModel(
-            os.environ.get("GEMINI_MODEL", "gemini-2.0-flash"),
-            system_instruction=SYSTEM_PROMPT,
-        )
-        resp = model.generate_content(
-            f"Extract the trade terms from this termsheet.\n\n{redacted_text}",
-            generation_config={
-                "response_mime_type": "application/json",
-                "response_schema": ExtractedTrade.model_json_schema(),
-            },
-        )
-        return ExtractedTrade.model_validate_json(resp.text)
-
-    return extract
-
-
-def _openai_extractor():
-    key = os.environ.get("OPENAI_API_KEY")
-    if not key:
-        raise ValueError("TERMSHEET_SECOND_PROVIDER=openai 인데 OPENAI_API_KEY가 없습니다")
-
-    def extract(redacted_text: str):
-        from openai import OpenAI
-        from server.termsheet import SYSTEM_PROMPT, ExtractedTrade
-
-        client = OpenAI(api_key=key)
-        completion = client.beta.chat.completions.parse(
-            model=os.environ.get("OPENAI_MODEL", "gpt-4o-2024-08-06"),
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",
-                 "content": f"Extract the trade terms from this termsheet.\n\n{redacted_text}"},
-            ],
-            response_format=ExtractedTrade,
-        )
-        return completion.choices[0].message.parsed
-
-    return extract
+    if name not in PROVIDERS:
+        raise ValueError(f"알 수 없는 TERMSHEET_SECOND_PROVIDER: {name!r} "
+                         f"(사용 가능: {', '.join(PROVIDERS)})")
+    return get_extractor(name, SECOND_MODEL_ENV)
