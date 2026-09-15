@@ -16,7 +16,7 @@ anthropic
 pypdf
 
 # Optional second opinion for cross-validation
-# google-generativeai
+google-genai
 # openai
 
 # Test tooling

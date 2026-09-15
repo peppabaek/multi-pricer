@@ -32,7 +32,10 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "label": "Google Gemini",
         "key_env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
         "model_env": "GEMINI_MODEL",
-        "default_model": "gemini-2.0-flash",
+        # Pinned rather than a "-latest" alias: the alias moves under you, and the
+        # aliased model answered 503 while the pinned one was fine. Override with
+        # GEMINI_MODEL when a newer release is worth taking.
+        "default_model": "gemini-3.5-flash",
         "tier_env": "GEMINI_TIER",
         "cost": {"free": "free tier", "paid": "paid"},
         "free_limits": "분당 15회 · 일 1,500회 (무료 티어)",
@@ -219,16 +222,20 @@ def _anthropic_extractor(model_override_env: Optional[str] = None):
 
 def _gemini_extractor(model_override_env: Optional[str] = None):
     def extract(redacted_text: str):
-        import google.generativeai as genai
+        from google import genai
+        from google.genai import types
         from server.termsheet import SYSTEM_PROMPT, ExtractedTrade
 
-        genai.configure(api_key=resolve_key("gemini"))
-        model = genai.GenerativeModel(resolve_model("gemini", model_override_env),
-                                      system_instruction=SYSTEM_PROMPT)
-        resp = model.generate_content(
-            f"Extract the trade terms from this termsheet.\n\n{redacted_text}",
-            generation_config={"response_mime_type": "application/json",
-                               "response_schema": ExtractedTrade.model_json_schema()})
+        client = genai.Client(api_key=resolve_key("gemini"))
+        resp = client.models.generate_content(
+            model=resolve_model("gemini", model_override_env),
+            contents=f"Extract the trade terms from this termsheet.\n\n{redacted_text}",
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                response_schema=ExtractedTrade,
+            ),
+        )
         return ExtractedTrade.model_validate_json(resp.text)
 
     return extract
@@ -278,15 +285,20 @@ def get_reviewer(name: str, model_override_env: Optional[str] = None):
 
     if name == "gemini":
         def review(redacted_text: str, disputes: str):
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types
             from server.termsheet import SYSTEM_PROMPT
-            genai.configure(api_key=resolve_key("gemini"))
-            model = genai.GenerativeModel(resolve_model("gemini", model_override_env),
-                                          system_instruction=SYSTEM_PROMPT)
-            r = model.generate_content(
-                f"{REVIEW_PROMPT.format(disputes=disputes)}\n\nDocument:\n\n{redacted_text}",
-                generation_config={"response_mime_type": "application/json",
-                                   "response_schema": ReviewSet.model_json_schema()})
+            client = genai.Client(api_key=resolve_key("gemini"))
+            r = client.models.generate_content(
+                model=resolve_model("gemini", model_override_env),
+                contents=f"{REVIEW_PROMPT.format(disputes=disputes)}"
+                         f"\n\nDocument:\n\n{redacted_text}",
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    response_schema=ReviewSet,
+                ),
+            )
             return {x.field: x.model_dump()
                     for x in ReviewSet.model_validate_json(r.text).reviews}
         return review

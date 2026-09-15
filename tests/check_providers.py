@@ -33,9 +33,11 @@ def probe(name: str) -> str:
             c.messages.create(model=resolve_model(name), max_tokens=8,
                               messages=[{"role": "user", "content": "ok"}])
         elif name == "gemini":
-            import google.generativeai as genai
-            genai.configure(api_key=resolve_key(name))
-            genai.GenerativeModel(resolve_model(name)).generate_content("ok")
+            from google import genai
+            # Keep a reference: an inline client is collected mid-request and the
+            # call fails with "client has been closed".
+            client = genai.Client(api_key=resolve_key(name))
+            client.models.generate_content(model=resolve_model(name), contents="ok")
         else:
             from openai import OpenAI
             c = OpenAI(api_key=resolve_key(name) or "not-needed",
