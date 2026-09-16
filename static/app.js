@@ -1967,7 +1967,7 @@ document.addEventListener("DOMContentLoaded", () => {
         Object.keys(draft).forEach(k => {
             if (draft[k] !== undefined && draft[k] !== "") ticket[k] = draft[k];
         });
-        ticket.alias = `TS 쨌 ${draft.customTenorInput || ""} ${draft.position || ""}`.trim();
+        ticket.alias = `TS · ${draft.customTenorInput || ""} ${draft.position || ""}`.trim();
         ticket.reviewState = "pending";
         ticket.termsheetName = fileName;
         ticket.docSha256 = data.doc_sha256;
@@ -2057,7 +2057,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 ts.questions.appendChild(h);
                 qs.forEach(q => {
                     const d = document.createElement("div");
-                    d.textContent = `쨌 ${q}`;
+                    d.textContent = `· ${q}`;
                     ts.questions.appendChild(d);
                 });
             }
@@ -2155,6 +2155,18 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         } catch (e) { /* status is advisory; upload still reports its own errors */ }
     })();
+
+    function revealPasteCard() {
+        const content = document.getElementById("paste-schedule-content");
+        if (content) {
+            content.classList.remove("collapsed");
+            content.style.display = "block";
+        }
+        const icon = document.getElementById("paste-collapse-icon");
+        if (icon) icon.textContent = "▾";
+        // Expand only - scrolling here would pull the trader away from the review
+        // panel they are meant to read first.
+    }
 
     function chip(text, color, bg, border) {
         return `<span style="font-size:10px;font-weight:700;color:${color};background:${bg};` +
@@ -4317,7 +4329,13 @@ document.addEventListener("DOMContentLoaded", () => {
         return ticketsStore[curr].find(t => t.id === activeId) || ticketsStore[curr][0] || null;
     }
 
+    // loadTicketToUI writes the form, and some of the setters it calls save the form
+    // back to the ticket. Mid-load the form is only half written, so that round trip
+    // wipes whatever has not been painted yet - the pasted schedule, in particular.
+    let suppressTicketSave = false;
+
     function saveActiveTicketFormData() {
+        if (suppressTicketSave) return;
         const ticket = getActiveTicket();
         if (!ticket) return;
 
@@ -4372,7 +4390,11 @@ document.addEventListener("DOMContentLoaded", () => {
             if (elements.leg1Adjust || elements.paramAdjust) ticket.adjustRule = (elements.leg1Adjust || elements.paramAdjust).value;
             if (elements.leg1PayCal || elements.paramPayCal) ticket.payCal = (elements.leg1PayCal || elements.paramPayCal).value;
 
-            if (elements.rcPasteInput) ticket.rawPasteText = elements.rcPasteInput.value;
+            // Pricing reads the per-leg boxes, so those are the source of truth.
+            // rc-paste-input is a hidden legacy field kept only for older saved tickets.
+            if (elements.rcPasteInputLeg1) ticket.rawPasteText = elements.rcPasteInputLeg1.value;
+            else if (elements.rcPasteInput) ticket.rawPasteText = elements.rcPasteInput.value;
+            if (elements.rcPasteInputLeg2) ticket.rawPasteTextLeg2 = elements.rcPasteInputLeg2.value;
             ticket.customSchedule = state.customSchedule;
         }
 
@@ -4381,6 +4403,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function loadTicketToUI(ticket) {
         if (!ticket) return;
+        suppressTicketSave = true;
+        try {
+            loadTicketToUIInner(ticket);
+        } finally {
+            suppressTicketSave = false;
+        }
+    }
+
+    function loadTicketToUIInner(ticket) {
 
         if (elements.ticketClientInput) elements.ticketClientInput.value = ticket.clientName || "";
         if (elements.ticketAliasInput) elements.ticketAliasInput.value = ticket.alias || "";
@@ -4455,7 +4486,15 @@ document.addEventListener("DOMContentLoaded", () => {
             if (elements.paramFixCal && ticket.fixCal) elements.paramFixCal.value = ticket.fixCal;
             if (elements.paramFixDay && ticket.fixDay !== undefined) elements.paramFixDay.value = ticket.fixDay;
             
-            if (elements.rcPasteInput) elements.rcPasteInput.value = ticket.rawPasteText || "";
+            const paste = ticket.rawPasteText || "";
+            if (elements.rcPasteInputLeg1) elements.rcPasteInputLeg1.value = paste;
+            if (elements.rcPasteInputLeg2) {
+                elements.rcPasteInputLeg2.value = ticket.rawPasteTextLeg2 || paste;
+            }
+            if (elements.rcPasteInput) elements.rcPasteInput.value = paste;
+            // A schedule arriving from a term sheet is easy to miss inside a collapsed
+            // card, so open it when there is one to look at.
+            if (paste.trim()) revealPasteCard();
             state.customSchedule = ticket.customSchedule || null;
             updateScheduleModeUI();
 
