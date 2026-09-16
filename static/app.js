@@ -3311,12 +3311,97 @@ document.addEventListener("DOMContentLoaded", () => {
         return /^(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(s);
     }
 
+    // The same header-driven reading the pricing engine does. This copy only feeds the
+    // badges and the popup table, but a period count that disagrees with the price is
+    // its own kind of wrong.
+    const SCHED_COLS = [
+        ["skip", ["상환", "repay", "amortis", "amortiz", "redemption"]],
+        ["skip", ["일수", "days", "day count"]],
+        ["skip", ["회차", "period no", "no.", "seq", "index", "번호"]],
+        ["fixing", ["변동금리결정", "금리결정", "픽싱", "fixing", "reset", "결정일"]],
+        ["start", ["시작일", "개시일", "start", "from", "기산일"]],
+        ["end", ["만기일", "종료일", "end", "accrual end", "maturity"]],
+        ["pay", ["이자교환일", "지급일", "결제일", "pay", "payment", "settle"]],
+        ["notional", ["명목", "notional", "nominal", "잔액", "outstanding",
+                      "원금", "principal"]],
+        ["rate", ["금리", "rate", "coupon"]],
+        ["spread", ["스프레드", "spread", "margin", "가산"]],
+    ];
+
+    function scheduleHeaderMap(cells) {
+        const map = {};
+        cells.forEach((cell, i) => {
+            const c = String(cell || "").trim().toLowerCase();
+            if (!c) return;
+            for (const [field, pats] of SCHED_COLS) {
+                if (pats.some(pat => c.indexOf(pat) >= 0)) {
+                    if (field !== "skip" && map[field] === undefined) map[field] = i;
+                    return;
+                }
+            }
+        });
+        return ("start" in map && "end" in map) ? map : null;
+    }
+
+    function splitScheduleRow(line) {
+        // Keep empty cells: a blank 회차 otherwise shifts every column after it.
+        for (const sep of ["\t", "|", ";"]) {
+            if (line.indexOf(sep) >= 0) {
+                const cells = line.split(sep).map(c => c.trim());
+                while (cells.length && !cells[cells.length - 1]) cells.pop();
+                return cells;
+            }
+        }
+        return line.split(/\s{2,}|\s+/).map(c => c.trim()).filter(Boolean);
+    }
+
+    function parseScheduleByHeader(text) {
+        let map = null;
+        const out = [];
+        for (const raw of text.split(/\r?\n/)) {
+            const cells = splitScheduleRow(raw);
+            if (!cells.length) continue;
+            if (!map) { map = scheduleHeaderMap(cells); continue; }
+
+            const at = f => (map[f] !== undefined && map[f] < cells.length)
+                ? cells[map[f]] : "";
+            const st = at("start"), ed = at("end");
+            if (!looksLikeScheduleDate(st) || !looksLikeScheduleDate(ed)) continue;
+
+            const num = v => {
+                const n = parseFloat(String(v).replace(/[,%\s]/g, "").replace(/bp/i, ""));
+                return isNaN(n) ? null : n;
+            };
+            out.push({
+                period_no: out.length + 1,
+                start_date: st,
+                end_date: ed,
+                pay_date: at("pay") || ed,
+                notional: num(at("notional")),
+                fixed_rate_pct: num(at("rate")),
+                fixing_date: at("fixing") || null,
+                spread_bp: num(at("spread")) || 0.0,
+            });
+        }
+        return (map && out.length) ? out : null;
+    }
+
     function parseClipboardScheduleText(text) {
         if (!text || !text.trim()) return [];
-        const lines = text.trim().split(/\r?\n/);
-        const parsedPeriods = [];
         const baseNotional = parseFormattedNumber(elements.notionalDisplay.value);
         const baseCoupon = parseFloat(elements.couponInput.value) || 3.5;
+
+        // A block that names its own columns is read by name, in any order.
+        const byHeader = parseScheduleByHeader(text);
+        if (byHeader) {
+            return byHeader.map(p => Object.assign(p, {
+                notional: p.notional === null ? baseNotional : p.notional,
+                fixed_rate_pct: p.fixed_rate_pct === null ? baseCoupon : p.fixed_rate_pct,
+            }));
+        }
+
+        const lines = text.trim().split(/\r?\n/);
+        const parsedPeriods = [];
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();

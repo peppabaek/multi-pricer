@@ -61,6 +61,122 @@ def parse_notional_str(n_str: Any, default_val: float = 100_000_000.0) -> float:
     except ValueError:
         return default_val
 
+# Column names seen on desks, in both languages. Matched against a header row so a
+# sheet can carry whatever extra columns it likes, in whatever order, without the
+# positional reading silently sliding one column to the left.
+_COL_PATTERNS = [
+    # (field, patterns) - order matters: the first field a header matches wins, and
+    # "원금 상환액" must be recognised as a repayment before "원금" claims it as notional.
+    ("skip_repay", ("상환", "repay", "amortis", "amortiz", "redemption")),
+    ("skip_days", ("일수", "days", "day count", "acc days")),
+    ("skip_no", ("회차", "period no", "no.", "seq", "index", "번호")),
+    ("fixing", ("변동금리결정", "금리결정", "픽싱", "fixing", "reset", "결정일")),
+    ("start", ("시작일", "개시일", "start", "from", "accrual start", "기산일")),
+    ("end", ("만기일", "종료일", "end", "to", "accrual end", "maturity")),
+    ("pay", ("이자교환일", "지급일", "결제일", "pay", "payment", "settle")),
+    ("notional", ("명목", "notional", "nominal", "잔액", "outstanding", "원금", "principal")),
+    ("rate", ("금리", "rate", "coupon", "fixed rate")),
+    ("spread", ("스프레드", "spread", "margin", "가산")),
+]
+
+
+def _classify_header(cell: str) -> Optional[str]:
+    c = str(cell or "").strip().lower()
+    if not c:
+        return None
+    for field, pats in _COL_PATTERNS:
+        if any(pat in c for pat in pats):
+            return None if field.startswith("skip_") else field
+    return None
+
+
+def _header_map(cells: List[str]) -> Dict[str, int]:
+    """Column index per field, from a header row. Empty if this is not a header."""
+    out: Dict[str, int] = {}
+    for i, cell in enumerate(cells):
+        field = _classify_header(cell)
+        if field and field not in out:
+            out[field] = i
+    # Dates alone are not enough to trust it: a data row can look like anything, but a
+    # header names at least a start and an end.
+    return out if {"start", "end"} <= set(out) else {}
+
+
+def _split_row(line: str) -> List[str]:
+    """
+    Split one pasted row, keeping empty cells where they are.
+
+    Excel gives an empty cell for a blank 회차, and dropping it shifts every column
+    after it - which is how a notional ends up being read as a date.
+    """
+    for sep in ("\t", "|", ";"):
+        if sep in line:
+            cells = [c.strip() for c in line.split(sep)]
+            while cells and not cells[-1]:
+                cells.pop()
+            return cells
+    return [c.strip() for c in re.split(r"\s{2,}|\s+", line) if c.strip()]
+
+
+def _rows_by_header(lines: List[str], default_notional: float,
+                    default_coupon_pct: float, default_spread_bp: float
+                    ) -> Optional[List[Dict[str, Any]]]:
+    """Read the block through its own header row, or return None if it has none."""
+    cmap: Dict[str, int] = {}
+    periods: List[Dict[str, Any]] = []
+
+    for line in lines:
+        cells = _split_row(line)
+        if not cells:
+            continue
+        if not cmap:
+            cmap = _header_map(cells)
+            continue                       # the header itself is never a period
+
+        def cell(field):
+            i = cmap.get(field)
+            return cells[i] if i is not None and i < len(cells) else ""
+
+        st = parse_date_str(cell("start"))
+        ed = parse_date_str(cell("end"))
+        if not st or not ed:
+            continue                       # spacer, subtotal, or a stray note
+
+        pay = parse_date_str(cell("pay")) or ed
+        notional = parse_notional_str(cell("notional"), default_notional)
+        rate = default_coupon_pct
+        spread = default_spread_bp
+        if cell("rate"):
+            try:
+                rate = float(str(cell("rate")).replace("%", "").replace(",", ""))
+            except ValueError:
+                pass
+        if cell("spread"):
+            try:
+                spread = float(str(cell("spread")).replace("bp", "").replace(",", ""))
+            except ValueError:
+                pass
+
+        per = {
+            "period_no": len(periods) + 1,
+            "start_date": st.strftime("%Y-%m-%d"),
+            "end_date": ed.strftime("%Y-%m-%d"),
+            "pay_date": pay.strftime("%Y-%m-%d"),
+            # The sheet named a pay date column, so what is in it is what the desk
+            # agreed - it is not re-rolled.
+            "pay_date_explicit": "pay" in cmap,
+            "notional": notional,
+            "fixed_rate_pct": rate,
+            "spread_bp": spread,
+        }
+        fx = parse_date_str(cell("fixing"))
+        if fx:
+            per["fixing_date"] = fx.strftime("%Y-%m-%d")
+        periods.append(per)
+
+    return periods if (cmap and periods) else None
+
+
 def parse_rollercoaster_paste(
     raw_text: str,
     effective_date: datetime.date,
@@ -76,6 +192,15 @@ def parse_rollercoaster_paste(
         return []
         
     lines = raw_text.strip().splitlines()
+
+    # A block with a header row is read by name. That covers any column order, extra
+    # columns, and the blank cells that come with sub-rows - none of which the
+    # positional reading below can survive.
+    by_header = _rows_by_header(lines, default_notional, default_coupon_pct,
+                                default_spread_bp)
+    if by_header:
+        return by_header
+
     rows = []
     
     for line in lines:

@@ -22,6 +22,7 @@ SUITES = [
     ("L14 Disagreement adjudication", "test_l14_adjudication.py"),
     ("L15 Provider failover", "test_l15_failover.py"),
     ("L16 File formats", "test_l16_formats.py"),
+    ("L17 Stub periods (amortising)", "test_l17_stub_periods.py"),
 ]
 
 total_fail = 0
