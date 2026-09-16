@@ -210,7 +210,7 @@ def t_14():
 
 
 # ---------------------------------------------------------------- pipeline
-def _fake_trade(_text):
+def _fake_trade(_text, **_kw):   # **_kw: call_extractor also takes `used`
     return ExtractedTrade(
         supported=True, currency="KRW", position="Pay Fixed", notional=5e10,
         effective_date="2026-09-15", maturity_date="2031-09-15", fixed_coupon_pct=2.72,

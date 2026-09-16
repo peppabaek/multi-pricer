@@ -8,6 +8,7 @@ text is sent to the model - and every intermediate is dropped when the request e
 import io
 import os
 import re
+import time
 import hashlib
 import datetime
 from typing import List, Optional, Dict, Any, Tuple, Literal
@@ -459,7 +460,81 @@ def primary_provider() -> str:
     return os.environ.get("TERMSHEET_PROVIDER", "anthropic").strip().lower()
 
 
-def call_extractor(redacted_text: str, model: str = None) -> ExtractedTrade:
+# A provider that just told us it is out of quota will say the same thing to the next
+# upload, so stop asking it for a while. In-process and deliberately short: a per-minute
+# limit clears itself, and a daily one should not silently disable a provider for good.
+_PROVIDER_COOLDOWN: Dict[str, float] = {}
+_COOLDOWN_SECONDS = 600
+
+
+def _cooling_off(name: str) -> bool:
+    until = _PROVIDER_COOLDOWN.get(name, 0)
+    if until and until > time.time():
+        return True
+    _PROVIDER_COOLDOWN.pop(name, None)
+    return False
+
+
+def _classify_provider_error(exc: Exception) -> Optional[str]:
+    """
+    Why a provider failed, when the reason is the provider rather than the document.
+
+    Returns a short reason for anything another model could succeed at, and None when
+    trying elsewhere would be pointless.
+    """
+    err = str(exc).lower()
+    if "credit balance is too low" in err or "insufficient_quota" in err:
+        return "잔액 부족"
+    if "rate limit" in err or "429" in err or "quota" in err or "resource_exhausted" in err:
+        return "호출 한도"
+    if "503" in err or "overloaded" in err or "unavailable" in err:
+        return "서비스 불안정"
+    if "timeout" in err or "timed out" in err or "connection" in err or "getaddrinfo" in err:
+        return "연결 실패"
+    if "401" in err or "403" in err or "unauthorized" in err or "api key" in err:
+        return "키 오류"
+    # Vendors retire models on their own schedule. That is the provider's problem, not
+    # the document's, so it should move to the next one rather than fail the upload.
+    if ("decommissioned" in err or "model_not_found" in err or "does not exist" in err
+            or "404" in err):
+        return "모델 없음"
+    return None
+
+
+def extraction_chain() -> List[str]:
+    """
+    The order models are tried in: the configured one, then whatever else can run.
+
+    Set TERMSHEET_FALLBACK_PROVIDERS to pin the order, or to an empty value to refuse
+    failover entirely - which is the right setting where only one vendor is cleared to
+    see the document.
+    """
+    from server.providers import PROVIDERS, is_available
+
+    primary = primary_provider()
+    chain = [primary] if primary in PROVIDERS else []
+
+    raw = os.environ.get("TERMSHEET_FALLBACK_PROVIDERS")
+    if raw is not None:
+        names = [n.strip().lower() for n in raw.split(",") if n.strip()]
+    else:
+        names = list(PROVIDERS)
+
+    for n in names:
+        if n in PROVIDERS and n not in chain and is_available(n):
+            chain.append(n)
+    return chain
+
+
+def call_extractor(redacted_text: str, model: str = None,
+                   used: Optional[Dict[str, Any]] = None) -> ExtractedTrade:
+    """
+    Read the document, moving to another model if the first one cannot answer.
+
+    `used` is filled in with which provider actually produced the result and what the
+    others said, so the caller can tell the trader - a different vendor reading the
+    document is a data-handling fact, not an implementation detail.
+    """
     load_env_file()
     from server.providers import get_extractor, PROVIDERS, is_available
 
@@ -467,32 +542,59 @@ def call_extractor(redacted_text: str, model: str = None) -> ExtractedTrade:
     if name not in PROVIDERS:
         raise ValueError(f"TERMSHEET_PROVIDER={name!r} 는 지원하지 않습니다 "
                          f"(사용 가능: {', '.join(PROVIDERS)})")
-    if not is_available(name):
+
+    chain = extraction_chain()
+    runnable = [n for n in chain if is_available(n)]
+    if not runnable:
         envs = " 또는 ".join(PROVIDERS[name]["key_env"]) or "(키 불필요)"
         raise ValueError(
             f"{PROVIDERS[name]['label']} 키가 없어 Term Sheet 분석을 실행할 수 없습니다. "
             f"{_ENV_FILE} 에 {envs} 를 추가하세요. "
             f"발급: {PROVIDERS[name]['signup']}")
 
-    try:
-        return get_extractor(name)(redacted_text)
-    except Exception as e:
-        err = str(e).lower()
-        if "credit balance is too low" in err or "insufficient_quota" in err:
-            if demo_mode_enabled():
-                sample = _match_synthetic_sample(redacted_text)
-                if sample:
-                    sample.demo_fallback = True
-                    return sample
-            raise ValueError(
-                f"{PROVIDERS[name]['label']} 잔액이 부족하여 분석을 완료하지 못했습니다. "
-                f"크레딧을 충전하거나, 무료 프로바이더로 전환하세요 "
-                f"(.env 에 TERMSHEET_PROVIDER=gemini 등).")
-        if "rate limit" in err or "429" in err or "quota" in err:
-            raise ValueError(
-                f"{PROVIDERS[name]['label']} 호출 한도에 걸렸습니다. "
-                f"잠시 후 다시 시도하거나 다른 프로바이더로 전환하세요.")
-        raise
+    attempts: List[Dict[str, str]] = []
+    # Skip anything still cooling off, but never skip every option: if that is all we
+    # have, try it anyway rather than refusing to read the document.
+    order = [n for n in runnable if not _cooling_off(n)] or runnable
+
+    for n in order:
+        try:
+            trade = get_extractor(n)(redacted_text)
+        except Exception as e:
+            reason = _classify_provider_error(e)
+            attempts.append({"provider": n, "label": PROVIDERS[n]["label"],
+                             "reason": reason or "실패", "detail": str(e)[:200]})
+            if reason in ("호출 한도", "잔액 부족"):
+                _PROVIDER_COOLDOWN[n] = time.time() + _COOLDOWN_SECONDS
+            if reason is None:
+                # Not the provider's fault - another model would fail the same way.
+                if demo_mode_enabled():
+                    sample = _match_synthetic_sample(redacted_text)
+                    if sample:
+                        sample.demo_fallback = True
+                        return sample
+                raise
+            continue
+
+        _PROVIDER_COOLDOWN.pop(n, None)
+        if used is not None:
+            used.update({"provider": n, "label": PROVIDERS[n]["label"],
+                         "model": PROVIDERS[n].get("default_model"),
+                         "fell_back": n != name, "attempts": attempts})
+        return trade
+
+    if demo_mode_enabled():
+        sample = _match_synthetic_sample(redacted_text)
+        if sample:
+            sample.demo_fallback = True
+            return sample
+
+    if used is not None:
+        used.update({"provider": None, "fell_back": False, "attempts": attempts})
+    detail = " / ".join(f"{a['label']}: {a['reason']}" for a in attempts)
+    raise ValueError(
+        f"사용 가능한 모든 프로바이더가 응답하지 못했습니다 ({detail}). "
+        f"잠시 후 다시 시도하거나 {_ENV_FILE} 에 다른 프로바이더 키를 추가하세요.")
 
 
 # ---------------------------------------------------------------- 5. verification
@@ -686,7 +788,11 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
     redacted_text, redaction_counts = redact(doc_text)
     leaks = redaction_leaks(redacted_text)
 
-    trade = (extractor or call_extractor)(redacted_text)
+    used: Dict[str, Any] = {}
+    if extractor is not None:
+        trade = extractor(redacted_text)
+    else:
+        trade = call_extractor(redacted_text, used=used)
 
     # Optional second opinion. Two models fail differently, so a field they disagree on
     # is a field the document is genuinely ambiguous about - it gets escalated to the
@@ -699,8 +805,13 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
     second_error = None
     if second_extractor is None and extractor is None:
         try:
-            from server.crossvalidate import secondary_extractor
-            second_extractor = secondary_extractor()
+            if used.get("provider") and used["provider"] == os.environ.get(
+                    "TERMSHEET_SECOND_PROVIDER", "").strip().lower():
+                second_error = ("1차 분석이 교차검증 프로바이더로 대체 실행되어 "
+                                "교차검증을 건너뛰었습니다")
+            else:
+                from server.crossvalidate import secondary_extractor
+                second_extractor = secondary_extractor()
         except Exception as e:
             second_error = str(e)
             print(f"[Termsheet] second provider unavailable: {e}")
@@ -758,6 +869,11 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
 
     mapped = to_ticket_draft(trade)
     blocked = sorted(set(unverified) | set(unmapped))
+
+    if used.get("fell_back"):
+        tried = ", ".join(f"{a['label']}({a['reason']})" for a in used.get("attempts", []))
+        warnings.insert(0, f"{used['label']}가 문서를 분석했습니다 — "
+                           f"설정된 1차 프로바이더 대체 (시도: {tried})")
 
     if second_configured and not (comparison and comparison.get("compared")):
         warnings.append(
@@ -825,5 +941,7 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
         "warnings": warnings,
         "cross_validation": comparison,
         "adjudication": adjudication,
+        # Which vendor actually saw the document, and what the others said.
+        "extraction": used or None,
         "redaction": {"counts": redaction_counts, "leaks": leaks},
     }

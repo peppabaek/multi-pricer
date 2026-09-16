@@ -397,6 +397,14 @@ body {
     text-overflow: ellipsis; white-space: nowrap;
 }
 .ts-modal-head-side { display: flex; align-items: center; gap: 10px; }
+.ts-model {
+    font-size: 10px; font-weight: 700; color: #475569;
+    background: #f1f5f9; border: 1px solid #cbd5e1;
+    padding: 2px 7px; border-radius: 4px;
+}
+/* Read by a vendor other than the configured one - worth noticing. */
+.ts-model.fell-back { color: #b45309; background: #fffbeb; border-color: #fcd34d; }
+.ts-model:empty { display: none; }
 .ts-redaction {
     font-size: 10px; font-weight: 700; color: #047857;
     background: #ecfdf5; border: 1px solid #a7f3d0;

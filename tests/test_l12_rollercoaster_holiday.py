@@ -89,7 +89,7 @@ def _periods(rows):
 
 
 def _stub(rows, coupon=2.72):
-    def make(_text):
+    def make(_text, **_kw):
         return ExtractedTrade(
             supported=True, currency="KRW", position="Pay Fixed",
             notional=rows[0][2], effective_date=rows[0][0], maturity_date=rows[-1][1],

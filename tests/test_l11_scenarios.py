@@ -73,7 +73,7 @@ def t_4():
 # ---------------------------------------------------------------- stubs
 def _stub(key):
     """Stand in for the model: what a correct extraction of each sample looks like."""
-    def make(_text):
+    def make(_text, **_kw):
         if key == "TS-A":
             return ExtractedTrade(
                 supported=True, currency="KRW", position="Rec Fixed", notional=5e10,

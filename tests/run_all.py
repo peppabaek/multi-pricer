@@ -20,6 +20,7 @@ SUITES = [
     ("L12 Varying terms + holidays", "test_l12_rollercoaster_holiday.py"),
     ("L13 Two-model cross-validation", "test_l13_crossvalidate.py"),
     ("L14 Disagreement adjudication", "test_l14_adjudication.py"),
+    ("L15 Provider failover", "test_l15_failover.py"),
 ]
 
 total_fail = 0

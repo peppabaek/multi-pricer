@@ -1871,6 +1871,7 @@ document.addEventListener("DOMContentLoaded", () => {
         backdrop: document.getElementById("ts-modal-backdrop"),
         file: document.getElementById("ts-modal-file"),
         close: document.getElementById("ts-modal-close"),
+        model: document.getElementById("ts-modal-model"),
         redaction: document.getElementById("ts-redaction"),
         warnings: document.getElementById("ts-warnings"),
         groups: document.getElementById("ts-groups"),
@@ -1988,6 +1989,19 @@ document.addEventListener("DOMContentLoaded", () => {
             ts.redaction.textContent = removed
                 ? `민감정보 ${removed}건 제거 후 분석 · 원본 미저장`
                 : "원본 미저장";
+        }
+
+        // Which vendor read the document. Different providers have different data
+        // policies, so when failover sends it somewhere other than the configured
+        // model, that is the trader's business, not a detail to bury in a log.
+        const ex = data.extraction;
+        if (ts.model) {
+            ts.model.textContent = ex && ex.label ? ex.label : "";
+            ts.model.className = "ts-model" + (ex && ex.fell_back ? " fell-back" : "");
+            ts.model.title = ex && ex.fell_back
+                ? `설정된 1차 프로바이더 대체 실행: ${(ex.attempts || [])
+                    .map(a => `${a.label} ${a.reason}`).join(", ")}`
+                : "";
         }
 
         // Cross-validation summary: what the two models disagreed on, how it was settled,
