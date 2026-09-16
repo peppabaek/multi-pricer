@@ -1122,10 +1122,8 @@ async def extract_termsheet(file: UploadFile = File(...)):
     """
     from server.termsheet import process_termsheet
 
-    name = (file.filename or "").lower()
-    if not name.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="PDF 파일만 지원합니다")
-
+    # No extension gate: what the file actually is decides how it is read, and a
+    # marketer's attachment is as likely to be an Excel sheet or a phone photo as a PDF.
     raw = await file.read()
     try:
         if not raw:
@@ -1136,7 +1134,7 @@ async def extract_termsheet(file: UploadFile = File(...)):
                 detail=f"파일이 너무 큽니다 ({len(raw)/1024/1024:.1f}MB). 최대 20MB까지 지원합니다"
             )
         try:
-            result = process_termsheet(raw)
+            result = process_termsheet(raw, filename=file.filename or "")
         except HTTPException:
             raise
         except ValueError as e:

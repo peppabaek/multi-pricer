@@ -21,6 +21,7 @@ SUITES = [
     ("L13 Two-model cross-validation", "test_l13_crossvalidate.py"),
     ("L14 Disagreement adjudication", "test_l14_adjudication.py"),
     ("L15 Provider failover", "test_l15_failover.py"),
+    ("L16 File formats", "test_l16_formats.py"),
 ]
 
 total_fail = 0

@@ -289,6 +289,88 @@ def get_extractor(name: str, model_override_env: Optional[str] = None,
     return _openai_style_extractor(name, model_override_env, model_name)
 
 
+# ---------------------------------------------------------------- vision
+# A picture of a term sheet has no text to strip before it is sent, so these read the
+# file itself. That is a real difference in what leaves the process, and the pipeline
+# says so on every trade that goes through here.
+VISION_CAPABLE = ("gemini", "anthropic", "openai")
+
+
+def supports_vision(name: str) -> bool:
+    return name in VISION_CAPABLE
+
+
+def get_vision_extractor(name: str, model_override_env: Optional[str] = None,
+                         model_name: Optional[str] = None):
+    """Read trade terms straight from an image or a scanned PDF."""
+    from server.termsheet import SYSTEM_PROMPT, ExtractedTrade
+
+    name = (name or "").strip().lower()
+    if not supports_vision(name) or not is_available(name):
+        return None
+
+    ask = ("Extract the trade terms from this term sheet. It is an image or a scan, "
+           "so read every table carefully - amortising schedules are usually a table "
+           "of dates and notionals. Quote what you saw for each field.")
+
+    if name == "gemini":
+        def extract(raw: bytes, mime: str):
+            from google import genai
+            from google.genai import types
+            client = genai.Client(api_key=resolve_key("gemini"))
+            resp = client.models.generate_content(
+                model=resolve_model("gemini", model_override_env, model_name),
+                contents=[types.Part.from_bytes(data=raw, mime_type=mime), ask],
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    response_schema=ExtractedTrade,
+                ),
+            )
+            return ExtractedTrade.model_validate_json(resp.text)
+        return extract
+
+    if name == "anthropic":
+        def extract(raw: bytes, mime: str):
+            import base64, anthropic
+            client = anthropic.Anthropic(api_key=resolve_key("anthropic"))
+            block = ({"type": "document",
+                      "source": {"type": "base64", "media_type": mime,
+                                 "data": base64.b64encode(raw).decode()}}
+                     if mime == "application/pdf" else
+                     {"type": "image",
+                      "source": {"type": "base64", "media_type": mime,
+                                 "data": base64.b64encode(raw).decode()}})
+            resp = client.messages.parse(
+                model=resolve_model("anthropic", model_override_env, model_name),
+                max_tokens=16000,
+                system=[{"type": "text", "text": SYSTEM_PROMPT}],
+                messages=[{"role": "user", "content": [block, {"type": "text", "text": ask}]}],
+                output_format=ExtractedTrade)
+            return resp.parsed_output
+        return extract
+
+    def extract(raw: bytes, mime: str):
+        import base64
+        from openai import OpenAI
+        client = OpenAI(api_key=resolve_key(name) or "not-needed",
+                        base_url=PROVIDERS[name].get("base_url"))
+        url = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+        resp = client.chat.completions.create(
+            model=resolve_model(name, model_override_env, model_name),
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": url}},
+                    {"type": "text",
+                     "text": f"{ask}\nReturn JSON matching this schema:\n"
+                             f"{ExtractedTrade.model_json_schema()}"}]},
+            ],
+            response_format={"type": "json_object"})
+        return ExtractedTrade.model_validate_json(resp.choices[0].message.content)
+    return extract
+
+
 # ---------------------------------------------------------------- reviewers
 def get_reviewer(name: str, model_override_env: Optional[str] = None):
     """Second-round re-read, restricted to the disputed fields."""

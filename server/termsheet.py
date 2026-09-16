@@ -97,10 +97,150 @@ FREQUENCIES = ["1M", "3M", "6M", "12M"]
 
 
 # ---------------------------------------------------------------- 1. text
-def extract_text(raw: bytes) -> str:
-    """Pull text out of a PDF in memory. Never touches disk."""
-    from pypdf import PdfReader
+# Formats a counterparty actually sends. Anything text-bearing is read here, in memory,
+# so the identity stripping downstream still applies to every word before it leaves.
+# A picture has no words to strip - see needs_vision below.
+IMAGE_TYPES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+               "gif": "image/gif", "bmp": "image/bmp", "webp": "image/webp",
+               "tif": "image/tiff", "tiff": "image/tiff"}
 
+
+def sniff_kind(raw: bytes, filename: str = "") -> str:
+    """
+    What this file is, by content first and name second.
+
+    Marketers rename things and browsers guess content types, so the magic bytes are
+    the authority; the extension only breaks ties the bytes cannot.
+    """
+    ext = (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+
+    if raw[:5] == b"%PDF-":
+        return "pdf"
+    if raw[:4] == b"PK\x03\x04":
+        # An OOXML container: which one is in the part names.
+        try:
+            import zipfile
+            names = zipfile.ZipFile(io.BytesIO(raw)).namelist()
+        except Exception:
+            names = []
+        if any(n.startswith("xl/") for n in names):
+            return "xlsx"
+        if any(n.startswith("word/") for n in names):
+            return "docx"
+        if any(n.startswith("ppt/") for n in names):
+            return "pptx"
+        return "zip"
+    if raw[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return "xls" if ext in ("xls", "xlt") else "ole"      # legacy Office
+    if raw[:8] == b"\x89PNG\r\n\x1a\n" or raw[:3] == b"\xff\xd8\xff" \
+            or raw[:6] in (b"GIF87a", b"GIF89a") or raw[:2] == b"BM" \
+            or raw[:4] in (b"II*\x00", b"MM\x00*") \
+            or (raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"):
+        return "image"
+    if ext in IMAGE_TYPES:
+        return "image"
+    if ext in ("csv", "tsv", "txt", "md", "json", "htm", "html"):
+        return "html" if ext in ("htm", "html") else "text"
+    return "text"
+
+
+def _xlsx_text(raw: bytes) -> str:
+    """
+    Every sheet as tab-separated rows.
+
+    Tab-separated is not incidental: an Excel term sheet usually carries the schedule
+    as a block of cells, and this is the shape the rollercoaster parser already reads.
+    """
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
+    out = []
+    try:
+        for ws in wb.worksheets:
+            out.append(f"--- sheet: {ws.title} ---")
+            for row in ws.iter_rows(values_only=True):
+                cells = ["" if c is None else
+                         (c.strftime("%Y-%m-%d") if hasattr(c, "strftime") else str(c))
+                         for c in row]
+                while cells and not cells[-1]:
+                    cells.pop()
+                if cells:
+                    out.append("\t".join(cells))
+    finally:
+        wb.close()
+    return "\n".join(out)
+
+
+def _docx_text(raw: bytes) -> str:
+    """Paragraphs and table rows, without pulling in python-docx for a zip of XML."""
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        xml = z.read("word/document.xml")
+    body = ET.fromstring(xml).find(f"{W}body")
+    lines = []
+
+    def para_text(para):
+        return "".join(t.text or "" for t in para.iter(f"{W}t"))
+
+    for el in body or []:
+        if el.tag == f"{W}p":
+            t = para_text(el).strip()
+            if t:
+                lines.append(t)
+        elif el.tag == f"{W}tbl":
+            for tr in el.findall(f"{W}tr"):
+                cells = [" ".join(para_text(p).strip() for p in tc.findall(f"{W}p")).strip()
+                         for tc in tr.findall(f"{W}tc")]
+                if any(cells):
+                    lines.append("\t".join(cells))
+    return "\n".join(lines)
+
+
+def _html_text(raw: bytes) -> str:
+    txt = raw.decode("utf-8", errors="replace")
+    txt = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", txt)
+    txt = re.sub(r"(?i)</(p|div|tr|br|h[1-6])\s*>", "\n", txt)
+    txt = re.sub(r"(?i)</t[dh]\s*>", "\t", txt)
+    txt = re.sub(r"<[^>]+>", "", txt)
+    from html import unescape
+    return re.sub(r"\n{3,}", "\n\n", unescape(txt))
+
+
+def _printable_ratio(text: str) -> float:
+    if not text:
+        return 0.0
+    ok = sum(1 for c in text if c.isprintable() or c in "\r\n\t")
+    return ok / len(text)
+
+
+def _plain_text(raw: bytes) -> str:
+    """
+    Decode a text file, and refuse one that is not text.
+
+    latin-1 decodes any byte at all, so without this check an arbitrary binary file
+    becomes a "document" full of control characters and gets sent to a model to find
+    out it was nothing - a wasted call, and bytes leaving the desk for no reason.
+    """
+    text = None
+    for enc in ("utf-8", "cp949", "utf-16"):
+        try:
+            text = raw.decode(enc)
+            break
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    if text is None:
+        text = raw.decode("latin-1", errors="replace")
+
+    if _printable_ratio(text) < 0.85:
+        raise ValueError("텍스트 파일이 아닙니다 — PDF, Excel, Word, 이미지, "
+                         "CSV/텍스트 형식으로 올려주세요")
+    return text
+
+
+def _pdf_text(raw: bytes) -> str:
+    from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(raw))
     pages = []
     for i, page in enumerate(reader.pages, 1):
@@ -109,6 +249,62 @@ def extract_text(raw: bytes) -> str:
         except Exception:
             pages.append(f"--- page {i} ---\n")
     return "\n\n".join(pages)
+
+
+def pdf_has_images(raw: bytes) -> bool:
+    """Whether a PDF carries any raster content - i.e. whether a scan could be in it."""
+    try:
+        from pypdf import PdfReader
+        for page in PdfReader(io.BytesIO(raw)).pages:
+            try:
+                if len(page.images):
+                    return True
+            except Exception:
+                # Some encodings pypdf cannot enumerate; assume there is something there
+                # rather than declaring a page blank on a decoding limitation.
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def body_length(text: str) -> int:
+    """Characters that are not our own page or sheet markers."""
+    return len(re.sub(r"---\s*(page|sheet:)[^\n]*---", "", text or "").strip())
+
+
+def extract_text(raw: bytes, filename: str = "") -> str:
+    """
+    Pull text out of whatever the marketer sent, in memory. Never touches disk.
+
+    Raises ValueError with something the trader can act on when the format is one this
+    machine cannot read, rather than a stack trace about a missing import.
+    """
+    kind = sniff_kind(raw, filename)
+    try:
+        if kind == "pdf":
+            return _pdf_text(raw)
+        if kind == "xlsx":
+            return _xlsx_text(raw)
+        if kind == "docx":
+            return _docx_text(raw)
+        if kind == "html":
+            return _html_text(raw)
+        if kind == "image":
+            return ""          # nothing to read: handled by the vision path
+        if kind == "xls":
+            raise ValueError("구형 .xls 형식입니다 - Excel에서 .xlsx로 저장한 뒤 올려주세요")
+        if kind == "pptx":
+            raise ValueError("PowerPoint는 아직 지원하지 않습니다 - "
+                             "PDF로 내보내거나 표를 Excel로 옮겨 올려주세요")
+        if kind in ("zip", "ole"):
+            raise ValueError("읽을 수 없는 형식입니다 - PDF, Excel, Word, 이미지, "
+                             "CSV/텍스트를 지원합니다")
+        return _plain_text(raw)
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"파일을 읽지 못했습니다 ({kind}): {e}")
 
 
 # ---------------------------------------------------------------- 2. redaction
@@ -608,6 +804,56 @@ def call_extractor(redacted_text: str, model: str = None,
         f"잠시 후 다시 시도하거나 {_ENV_FILE} 에 다른 프로바이더 키를 추가하세요.")
 
 
+def call_vision_extractor(raw: bytes, mime: str,
+                          used: Optional[Dict[str, Any]] = None) -> ExtractedTrade:
+    """
+    Read a term sheet that has no text in it, walking the same failover ladder.
+
+    Only providers that can see are tried; if none can, that is said plainly rather
+    than falling through to a text model that would receive nothing.
+    """
+    load_env_file()
+    from server.providers import (get_vision_extractor, supports_vision, PROVIDERS,
+                                  is_available, model_candidates)
+
+    name = primary_provider()
+    runnable = [n for n in extraction_chain() if is_available(n) and supports_vision(n)]
+    if not runnable:
+        raise ValueError(
+            "이미지·스캔 문서를 읽을 수 있는 프로바이더가 없습니다. "
+            "Gemini 또는 Anthropic 키를 설정하거나, 텍스트가 있는 PDF·Excel로 올려주세요.")
+
+    attempts: List[Dict[str, str]] = []
+    cands = [(n, m) for n in runnable for m in model_candidates(n)]
+    order = [c for c in cands if not _cooling_off(f"{c[0]}:{c[1]}")] or cands
+
+    for n, mdl in order:
+        fn = get_vision_extractor(n, model_name=mdl)
+        if fn is None:
+            continue
+        try:
+            trade = fn(raw, mime)
+        except Exception as e:
+            reason = _classify_provider_error(e)
+            attempts.append({"provider": n, "label": PROVIDERS[n]["label"], "model": mdl,
+                             "reason": reason or "실패", "detail": str(e)[:200]})
+            if reason in ("호출 한도", "잔액 부족"):
+                _PROVIDER_COOLDOWN[f"{n}:{mdl}"] = time.time() + _COOLDOWN_SECONDS
+            if reason is None:
+                raise
+            continue
+
+        _PROVIDER_COOLDOWN.pop(f"{n}:{mdl}", None)
+        if used is not None:
+            used.update({"provider": n, "label": PROVIDERS[n]["label"], "model": mdl,
+                         "fell_back": n != name or mdl != model_candidates(n)[0],
+                         "vision": True, "attempts": attempts})
+        return trade
+
+    detail = " / ".join(f"{a['label']} {a.get('model', '')}: {a['reason']}" for a in attempts)
+    raise ValueError(f"이미지 분석이 실패했습니다 ({detail}).")
+
+
 # ---------------------------------------------------------------- 5. verification
 _ENUM_FIELDS = {
     "leg1_day_count": DAY_COUNTS, "leg2_day_count": DAY_COUNTS,
@@ -836,32 +1082,91 @@ def schedule_preview(draft: Dict[str, Any]) -> List[Dict[str, Any]]:
         return []
 
 
+def vision_allowed() -> bool:
+    """
+    Whether a file with no readable text may be sent to the model as-is.
+
+    On by default because a scan or a photo is a normal way to receive a term sheet,
+    but it is the one path where identity is not stripped first, so a desk that cannot
+    allow that sets TERMSHEET_ALLOW_IMAGE=0.
+    """
+    return (os.environ.get("TERMSHEET_ALLOW_IMAGE", "1").strip().lower()
+            not in ("0", "false", "no", "off"))
+
+
+def _mime_for(raw: bytes, filename: str = "") -> str:
+    """
+    Content first, the same rule sniff_kind follows.
+
+    A PNG saved as .jpg is still a PNG, and announcing the wrong type is how a
+    vendor comes back with a decode error on a file that was perfectly fine.
+    """
+    if sniff_kind(raw, filename) == "pdf":
+        return "application/pdf"
+    for magic, mime in (
+        (b"\xff\xd8\xff", "image/jpeg"),
+        (b"\x89PNG\r\n\x1a\n", "image/png"),
+        (b"GIF87a", "image/gif"),
+        (b"GIF89a", "image/gif"),
+        (b"BM", "image/bmp"),
+        (b"II*\x00", "image/tiff"),
+        (b"MM\x00*", "image/tiff"),
+    ):
+        if raw.startswith(magic):
+            return mime
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    ext = (filename or "").rsplit(".", 1)[-1].lower()
+    return IMAGE_TYPES.get(ext, "image/jpeg")
+
+
 # ---------------------------------------------------------------- 7. orchestration
 def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
-                      reviewers=None) -> Dict[str, Any]:
+                      reviewers=None, filename: str = "") -> Dict[str, Any]:
     """
     Full pipeline. Extractors and reviewers are injectable so every path - including the
     two-model disagreement round - can be tested without touching an API.
     """
     doc_sha = hashlib.sha256(raw).hexdigest()
-    try:
-        doc_text = extract_text(raw)
-    except Exception as e:
-        raise ValueError(f"PDF를 읽을 수 없습니다: {e}")
-    # Page markers are always present, so measure the real content behind them - an
-    # image-only scan otherwise looks non-empty and would be sent out with nothing in it.
-    body = re.sub(r"--- page \d+ ---", "", doc_text).strip()
-    if len(body) < 40:
-        raise ValueError("PDF에서 텍스트를 추출하지 못했습니다 (스캔 이미지는 아직 지원하지 않습니다)")
+    kind = sniff_kind(raw, filename)
+    doc_text = "" if kind == "image" else extract_text(raw, filename)
 
-    redacted_text, redaction_counts = redact(doc_text)
-    leaks = redaction_leaks(redacted_text)
+    # Markers are always present, so measure the real content behind them - an
+    # image-only scan otherwise looks non-empty and would be sent out with nothing in it.
+    scanned = body_length(doc_text) < 40
+    # A text-free PDF is a scan only if there is something in it to look at. A blank
+    # one is rejected here rather than spending a model call to be told it is blank.
+    by_vision = kind == "image" or (kind == "pdf" and scanned and pdf_has_images(raw))
+    if kind == "pdf" and scanned and not by_vision:
+        raise ValueError("PDF에서 텍스트를 추출하지 못했습니다 - 내용이 비어 있습니다")
+
+    if scanned and not by_vision:
+        # Unclassifiable bytes decode as "text" through the latin-1 fallback, which
+        # would otherwise send an arbitrary file to the model to discover it was nothing.
+        raise ValueError(
+            "이 파일에서 읽을 수 있는 내용을 찾지 못했습니다 — "
+            "PDF, Excel, Word, 이미지, CSV/텍스트 형식인지 확인해주세요")
+
+    if by_vision and not vision_allowed():
+        raise ValueError(
+            "이 문서에는 읽을 수 있는 텍스트가 없습니다. 이미지·스캔 분석이 꺼져 있어 "
+            "(TERMSHEET_ALLOW_IMAGE=0) 처리할 수 없습니다 - 텍스트가 있는 PDF나 Excel로 올려주세요.")
 
     used: Dict[str, Any] = {}
-    if extractor is not None:
-        trade = extractor(redacted_text)
+    if by_vision:
+        # Nothing to strip: there are no words to find the counterparty in, so the file
+        # itself is what goes to the model. The caller is told, every time.
+        mime = _mime_for(raw, filename)
+        redacted_text, redaction_counts, leaks = "", {}, []
+        trade = extractor(raw) if extractor is not None \
+            else call_vision_extractor(raw, mime, used=used)
     else:
-        trade = call_extractor(redacted_text, used=used)
+        redacted_text, redaction_counts = redact(doc_text)
+        leaks = redaction_leaks(redacted_text)
+        if extractor is not None:
+            trade = extractor(redacted_text)
+        else:
+            trade = call_extractor(redacted_text, used=used)
 
     # Optional second opinion. Two models fail differently, so a field they disagree on
     # is a field the document is genuinely ambiguous about - it gets escalated to the
@@ -938,6 +1243,11 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
 
     mapped = to_ticket_draft(trade)
     blocked = sorted(set(unverified) | set(unmapped))
+
+    if by_vision:
+        warnings.insert(0,
+            "이미지·스캔 문서여서 원문에서 민감정보를 제거하지 못하고 "
+            "파일 그대로 모델에 전달했습니다 - 거래상대 정보가 포함됐을 수 있습니다")
 
     if used.get("fell_back"):
         # With no attempts recorded the primary was never called - it was still inside
@@ -1019,5 +1329,6 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
         "extraction": used or None,
         # The schedule as the pricer will read it, for the review popup.
         "schedule_preview": schedule_preview(mapped["draft"]),
+        "source": {"kind": kind, "by_vision": by_vision, "redacted": not by_vision},
         "redaction": {"counts": redaction_counts, "leaks": leaks},
     }

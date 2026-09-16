@@ -1923,10 +1923,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     async function uploadTermsheet(file) {
         if (!file) return;
-        if (!/\.pdf$/i.test(file.name)) {
-            showToast("PDF 파일만 지원합니다", "warning");
-            return;
-        }
         tsShow("busy");
         if (ts.busyText) ts.busyText.textContent = `${file.name} 분석 중…`;
 
@@ -1991,10 +1987,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const counts = (data.redaction && data.redaction.counts) || {};
         const removed = Object.values(counts).reduce((a, b) => a + b, 0);
+        const src = data.source || {};
         if (ts.redaction) {
-            ts.redaction.textContent = removed
-                ? `민감정보 ${removed}건 제거 후 분석 · 원본 미저장`
-                : "원본 미저장";
+            // An image has no text to strip, so it went to the model as it arrived.
+            // That is a different promise from the one the green chip makes.
+            if (src.by_vision) {
+                ts.redaction.textContent = "이미지 분석 · 마스킹 없이 전달 · 원본 미저장";
+                ts.redaction.className = "ts-redaction unredacted";
+            } else {
+                ts.redaction.textContent = removed
+                    ? `민감정보 ${removed}건 제거 후 분석 · 원본 미저장`
+                    : "원본 미저장";
+                ts.redaction.className = "ts-redaction";
+            }
         }
 
         // Which vendor read the document. Different providers have different data

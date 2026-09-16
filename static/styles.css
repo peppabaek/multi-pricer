@@ -405,6 +405,10 @@ body {
 /* Read by a vendor other than the configured one - worth noticing. */
 .ts-model.fell-back { color: #b45309; background: #fffbeb; border-color: #fcd34d; }
 .ts-model:empty { display: none; }
+/* Sent as it arrived: not the same assurance as the redacted path. */
+.ts-redaction.unredacted {
+    color: #b45309; background: #fffbeb; border-color: #fcd34d;
+}
 .ts-redaction {
     font-size: 10px; font-weight: 700; color: #047857;
     background: #ecfdf5; border: 1px solid #a7f3d0;

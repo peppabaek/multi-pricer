@@ -71,7 +71,7 @@ def t_e5():
     seen = {}
     original = tsmod.process_termsheet
 
-    def _spy(raw, extractor=None):
+    def _spy(raw, extractor=None, **kw):
         import inspect
         frame = inspect.currentframe().f_back
         while frame and "file" not in frame.f_locals:
@@ -80,7 +80,7 @@ def t_e5():
         inner = getattr(up, "file", None)
         seen["rolled"] = getattr(inner, "_rolled", None)
         seen["path"] = getattr(getattr(inner, "_file", None), "name", None)
-        return original(raw, extractor=_fake_trade)
+        return original(raw, extractor=_fake_trade, **kw)
 
     tsmod.process_termsheet = _spy
     try:
