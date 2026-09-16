@@ -131,6 +131,48 @@ def t_e7():
         raise AssertionError(f"non-positive DV01: {res['dv01']}")
 
 
+@case("L10-E10", "the dashboard stamps its asset URLs from the files on disk")
+def t_e10():
+    import re as _re
+    r = client.get("/")
+    if r.status_code != 200:
+        raise AssertionError(f"HTTP {r.status_code}")
+    if "no-store" not in (r.headers.get("cache-control") or ""):
+        raise AssertionError(f"index is cacheable: {r.headers.get('cache-control')!r}")
+    refs = dict(_re.findall(r'(?:href|src)="([\w.-]+\.(?:js|css))\?v=([^"]+)"', r.text))
+    for f in ("app.js", "styles.css", "terminal.css"):
+        if f not in refs:
+            raise AssertionError(f"{f} has no version stamp: {sorted(refs)}")
+        if refs[f] in ("", "0"):
+            raise AssertionError(f"{f} stamp did not resolve: {refs[f]!r}")
+
+
+@case("L10-E11", "touching a script changes its stamp, so a cached copy is not reused")
+def t_e11():
+    import re as _re, os as _os, time as _time
+    from server.app import static_dir
+
+    def stamp_of(name):
+        body = client.get("/").text
+        m = _re.search(r'(?:href|src)="' + name + r'\?v=([^"]+)"', body)
+        return m.group(1) if m else None
+
+    path = _os.path.join(static_dir, "app.js")
+    before = stamp_of("app.js")
+    st = _os.stat(path)
+    try:
+        # Move the mtime rather than rewriting the file: the encoding round-trip that
+        # editing app.js in place once cost us is not worth repeating in a test.
+        _os.utime(path, (st.st_atime, st.st_mtime + 120))
+        after = stamp_of("app.js")
+    finally:
+        _os.utime(path, (st.st_atime, st.st_mtime))
+    if before == after:
+        raise AssertionError(f"stamp did not move with the file: {before!r}")
+    if stamp_of("app.js") != before:
+        raise AssertionError("stamp did not return with the original mtime")
+
+
 if __name__ == "__main__":
     print("\n=== L10 Termsheet endpoint ===")
     sys.exit(1 if run_all("L10-E") else 0)

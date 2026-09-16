@@ -1468,6 +1468,39 @@ async def favicon():
 # ==============================================================================
 static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static"))
 os.makedirs(static_dir, exist_ok=True)
+
+# The dashboard's asset URLs carried a hand-written version query (app.js?v=4.2) that
+# nobody remembered to bump. A browser that had cached that URL kept running the old
+# script against freshly deployed markup - which does not look like a stale cache, it
+# looks like the change was never made. Stamp the URLs from the files on disk instead,
+# so the query changes whenever the file does and never when it does not.
+_ASSET_REF = re.compile(r'(?P<attr>href|src)="(?P<file>[\w.-]+\.(?:js|css))(?:\?[^"]*)?"')
+
+
+def _asset_stamp(name: str) -> str:
+    try:
+        st = os.stat(os.path.join(static_dir, name))
+        return f"{int(st.st_mtime)}-{st.st_size}"
+    except OSError:
+        return "0"
+
+
+def _stamped_index() -> str:
+    with open(os.path.join(static_dir, "index.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    return _ASSET_REF.sub(
+        lambda m: f'{m.group("attr")}="{m.group("file")}?v={_asset_stamp(m.group("file"))}"',
+        html)
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+async def dashboard():
+    # no-store on the page itself: it is small, and it is what carries the stamps.
+    return Response(_stamped_index(), media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-store"})
+
+
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 if __name__ == "__main__":

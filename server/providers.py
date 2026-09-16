@@ -102,7 +102,11 @@ def resolve_tier(name: str) -> str:
             return "paid"
         if v in ("free", "trial"):
             return "free"
-    return "free" if isinstance(spec.get("cost"), dict) else "paid"
+    cost = spec.get("cost")
+    if isinstance(cost, dict):
+        return "free"
+    # A provider with a single, free cost - a local model, say - is not paid.
+    return "free" if isinstance(cost, str) and "free" in cost.lower() else "paid"
 
 
 def _pick(value, tier: str):

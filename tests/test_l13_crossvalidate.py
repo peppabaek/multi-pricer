@@ -141,6 +141,42 @@ def t_11():
             os.environ["TERMSHEET_SECOND_PROVIDER"] = saved
 
 
+@case("L13-12", "a configured cross-check that did not run is declared, not hidden")
+def t_12():
+    import os
+    saved = os.environ.get("TERMSHEET_SECOND_PROVIDER")
+    os.environ["TERMSHEET_SECOND_PROVIDER"] = "groq"   # configured, no key here
+    try:
+        res = process_termsheet(_MINIMAL_PDF, extractor=_fake_trade)
+        if res.get("cross_validation") is not None:
+            raise AssertionError("cross-validation reported a result it never got")
+        if not any("교차검증이 실행되지 않아" in w for w in res["warnings"]):
+            raise AssertionError(
+                f"a cross-check that did not run was left unsaid: {res['warnings']}")
+    finally:
+        if saved is None:
+            os.environ.pop("TERMSHEET_SECOND_PROVIDER", None)
+        else:
+            os.environ["TERMSHEET_SECOND_PROVIDER"] = saved
+
+
+@case("L13-13", "a successful cross-check does not claim it was skipped")
+def t_13():
+    import os
+    saved = os.environ.get("TERMSHEET_SECOND_PROVIDER")
+    os.environ["TERMSHEET_SECOND_PROVIDER"] = "groq"
+    try:
+        res = process_termsheet(_MINIMAL_PDF, extractor=_fake_trade,
+                                second_extractor=_fake_trade)
+        if any("교차검증이 실행되지 않아" in w for w in res["warnings"]):
+            raise AssertionError(f"cross-check ran but was reported as skipped: {res['warnings']}")
+    finally:
+        if saved is None:
+            os.environ.pop("TERMSHEET_SECOND_PROVIDER", None)
+        else:
+            os.environ["TERMSHEET_SECOND_PROVIDER"] = saved
+
+
 if __name__ == "__main__":
     print("\n=== L13 Two-model cross-validation ===")
     sys.exit(1 if run_all("L13") else 0)

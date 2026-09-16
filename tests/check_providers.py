@@ -66,7 +66,13 @@ def main():
     print("=" * 78)
     print(f"  1차 프로바이더 : {st['provider_label']}  ({st.get('model')})")
     print(f"  실행 가능      : {'예' if st['ready'] else '아니오 — ' + st.get('reason', '')}")
-    print(f"  교차검증       : {'켜짐 — ' + str(st['second_provider']) if st['cross_check'] else '꺼짐'}")
+    if st["cross_check"]:
+        cross = f"켜짐 — {st['second_provider']}"
+    elif st.get("second_pending"):
+        cross = f"대기 — {st['second_provider']} 키 미설정"
+    else:
+        cross = "꺼짐"
+    print(f"  교차검증       : {cross}")
     print("=" * 78)
 
     rows = describe()

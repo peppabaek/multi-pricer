@@ -63,6 +63,9 @@ def extraction_status() -> Dict[str, Any]:
         "model": resolve_model(primary) if known else None,
         "cross_check": bool(second and second in PROVIDERS and is_available(second)),
         "second_provider": second or None,
+        # Configured but unusable is its own state: the trader would otherwise read
+        # "off" as a choice someone made, not a key that was never pasted.
+        "second_pending": bool(second and second in PROVIDERS and not is_available(second)),
         "providers": describe(),
     }
     if not ready:
@@ -689,11 +692,17 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
     # is a field the document is genuinely ambiguous about - it gets escalated to the
     # trader rather than resolved by preferring one vendor.
     comparison = None
+    # Whether a second opinion was asked for, as distinct from whether one arrived.
+    # A free tier can rate-limit or a model can be retired, and a cross-check that
+    # silently did not run must not look like one that ran and agreed.
+    second_configured = bool(os.environ.get("TERMSHEET_SECOND_PROVIDER", "").strip())
+    second_error = None
     if second_extractor is None and extractor is None:
         try:
             from server.crossvalidate import secondary_extractor
             second_extractor = secondary_extractor()
         except Exception as e:
+            second_error = str(e)
             print(f"[Termsheet] second provider unavailable: {e}")
     adjudication = None
     if second_extractor is not None:
@@ -721,6 +730,7 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
                         if hasattr(trade, field):
                             setattr(trade, field, value)
         except Exception as e:
+            second_error = str(e)
             print(f"[Termsheet] cross-validation failed: {e}")
             comparison = {"compared": False, "error": str(e)}
 
@@ -748,6 +758,11 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
 
     mapped = to_ticket_draft(trade)
     blocked = sorted(set(unverified) | set(unmapped))
+
+    if second_configured and not (comparison and comparison.get("compared")):
+        warnings.append(
+            "교차검증이 실행되지 않아 단일 모델 결과입니다"
+            + (f" — {second_error}" if second_error else ""))
 
     if comparison and comparison.get("compared"):
         from server.crossvalidate import disagreement_fields
