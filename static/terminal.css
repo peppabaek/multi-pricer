@@ -535,9 +535,16 @@ label, .form-label, .param-label {
     border-radius: var(--t-radius);
     font-size: 11.5px;
 }
-.ts-review { border: 1px solid var(--t-line); border-radius: var(--t-radius); }
-.ts-field { border-radius: 2px; background: var(--t-sunk); }
-.ts-field .v { font-family: var(--t-mono); font-variant-numeric: tabular-nums; }
+/* Review popup: same chrome as the rest of the terminal, numbers in the mono face */
+.ts-modal { border-radius: var(--t-radius); border-color: var(--t-line); }
+.ts-modal-head, .ts-modal-foot { background: var(--t-sunk); border-color: var(--t-line); }
+.ts-modal-head-main strong { letter-spacing: .02em; }
+.ts-row { border-radius: 2px; background: var(--t-sunk); border-color: var(--t-line-soft); }
+.ts-row .v { font-family: var(--t-mono); font-variant-numeric: tabular-nums; }
+.ts-sched-wrap { border-radius: 2px; border-color: var(--t-line); }
+.ts-sched-table td { font-family: var(--t-mono); font-variant-numeric: tabular-nums; }
+.ts-sched-table th { background: var(--t-sunk); border-color: var(--t-line); }
+.ts-sched-summary { font-family: var(--t-mono); }
 
 /* ---------- chart ------------------------------------------------------- */
 .curve-chart-card {

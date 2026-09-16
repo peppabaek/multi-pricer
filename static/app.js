@@ -1867,17 +1867,21 @@ document.addEventListener("DOMContentLoaded", () => {
         busy: document.getElementById("ts-busy"),
         busyText: document.getElementById("ts-busy-text"),
         cancel: document.getElementById("ts-cancel"),
-        review: document.getElementById("ts-review"),
-        title: document.getElementById("ts-review-title"),
+        // Review popup
+        backdrop: document.getElementById("ts-modal-backdrop"),
+        file: document.getElementById("ts-modal-file"),
+        close: document.getElementById("ts-modal-close"),
         redaction: document.getElementById("ts-redaction"),
         warnings: document.getElementById("ts-warnings"),
-        fields: document.getElementById("ts-fields"),
+        groups: document.getElementById("ts-groups"),
+        schedWrap: document.getElementById("ts-sched-wrap"),
+        schedSummary: document.getElementById("ts-sched-summary"),
         questions: document.getElementById("ts-questions"),
+        footNote: document.getElementById("ts-foot-note"),
         confirm: document.getElementById("ts-confirm"),
         discard: document.getElementById("ts-discard"),
     };
     let tsAbort = null;
-    let tsPendingTicketId = null;
 
     const TS_LABELS = {
         product: "상품", position: "포지션", notionalDisplay: "원금",
@@ -1908,7 +1912,6 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!ts.zone) return;
         if (ts.idle) ts.idle.hidden = which !== "idle";
         if (ts.busy) ts.busy.hidden = which !== "busy";
-        if (ts.review) ts.review.hidden = which !== "review";
     }
 
     async function uploadTermsheet(file) {
@@ -1950,6 +1953,24 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // Review happens in a popup, and nothing reaches the dashboard until the trader
+    // presses confirm. Holding the draft here rather than building a ticket up front
+    // means a discarded term sheet leaves no trace in the workspace.
+    let tsPending = null;
+
+    const TS_GROUPS = [
+        { title: "기본 조건", keys: [
+            "product", "position", "notionalDisplay", "customTenorInput",
+            "effectiveDate", "maturityDate", "coupon", "spreadBp",
+            "crsSwapType", "capitalFxRate", "krwNotionalDisplay"] },
+        { title: "Leg 1", keys: [
+            "leg1DayCount", "leg1PaymentFreq", "leg1Convention",
+            "leg1Stub", "leg1Adjust", "leg1PayCal"] },
+        { title: "Leg 2", keys: [
+            "leg2DayCount", "leg2PaymentFreq", "leg2Convention",
+            "leg2Stub", "leg2Adjust", "leg2Cal", "fixDay"] },
+    ];
+
     function renderTermsheetReview(data, fileName) {
         const draft = data.ticket_draft || {};
         const inferred = new Set(data.inferred_fields || []);
@@ -1957,90 +1978,41 @@ document.addEventListener("DOMContentLoaded", () => {
         const quotes = {};
         (data.provenance || []).forEach(p => { quotes[p.field] = p; });
 
-        // Build the ticket up front so review and pricing act on the same object.
-        const targetCurrency = draft.product || "USD";
-        if (state.currency !== targetCurrency) {
-            setCurrency(targetCurrency);
-        }
+        tsPending = { data: data, draft: draft, fileName: fileName, blocked: blocked };
 
-        const ticket = getDefaultTicketData(targetCurrency);
-        Object.keys(draft).forEach(k => {
-            if (draft[k] !== undefined && draft[k] !== "") ticket[k] = draft[k];
-        });
-        ticket.alias = `TS · ${draft.customTenorInput || ""} ${draft.position || ""}`.trim();
-        ticket.reviewState = "pending";
-        ticket.termsheetName = fileName;
-        ticket.docSha256 = data.doc_sha256;
-        ticket.termsheetEdits = [];
-        ticket.termsheetDraft = JSON.parse(JSON.stringify(draft));
+        if (ts.file) ts.file.textContent = fileName;
 
-        if (!ticketsStore[targetCurrency]) ticketsStore[targetCurrency] = [];
-        ticketsStore[targetCurrency].push(ticket);
-        activeTicketIdByProduct[targetCurrency] = ticket.id;
-        tsPendingTicketId = ticket.id;
-
-        loadTicketToUI(ticket);
-        renderTicketBar();
-
-        // Field cards
-        if (ts.title) ts.title.textContent = `추출된 거래조건 검토 — ${fileName}`;
         const counts = (data.redaction && data.redaction.counts) || {};
         const removed = Object.values(counts).reduce((a, b) => a + b, 0);
         if (ts.redaction) {
             ts.redaction.textContent = removed
                 ? `민감정보 ${removed}건 제거 후 분석 · 원본 미저장`
-                : `원본 미저장`;
-        }
-
-        if (ts.fields) {
-            ts.fields.innerHTML = "";
-            Object.keys(TS_LABELS).forEach(key => {
-                if (draft[key] === undefined || draft[key] === "") return;
-                const srcKey = TS_FIELD_KEY[key] || key;
-                let cls = "ok", hint = "";
-                if (blocked.has(srcKey)) {
-                    cls = "blocked"; hint = "근거 확인 실패 — 직접 확인 필요";
-                } else if (inferred.has(srcKey)) {
-                    cls = "inferred"; hint = "문서에 없음 — 시장 관행 적용";
-                } else if (quotes[srcKey] && quotes[srcKey].quote) {
-                    hint = quotes[srcKey].quote;
-                }
-                const val = key === "rawPasteText"
-                    ? `${String(draft[key]).split("\n").length}개 기간`
-                    : draft[key];
-                const card = document.createElement("div");
-                card.className = `ts-field ${cls}`;
-                card.innerHTML =
-                    `<span class="k"></span><span class="v"></span><span class="q"></span>`;
-                card.querySelector(".k").textContent = TS_LABELS[key];
-                card.querySelector(".v").textContent = val;
-                card.querySelector(".q").textContent = hint;
-                if (hint) card.title = hint;
-                ts.fields.appendChild(card);
-            });
+                : "원본 미저장";
         }
 
         // Cross-validation summary: what the two models disagreed on, how it was settled,
-        // and which one was wrong. Shown above the warnings so the trader sees the
-        // provenance of a contested value before the value itself.
+        // and which one was wrong - the provenance of a contested value, shown before it.
         const adj = data.adjudication;
-        const warns = (data.warnings || []).slice();
         if (ts.redaction && adj) {
             const errs = Object.entries(adj.error_counts || {})
                 .filter(([, n]) => n > 0)
-                .map(([m, n]) => `${m} ${n}\uAC74`).join(", ");
+                .map(([m, n]) => `${m} ${n}건`).join(", ");
             const settled = (adj.trail || []).filter(t => t.resolution !== "unresolved").length;
             ts.redaction.textContent +=
-                ` \u00B7 \uAD50\uCC28\uAC80\uC99D ${settled}/${(adj.trail || []).length}\uAC74 \uD574\uACB0`
-                + (errs ? ` (\uC624\uB958: ${errs})` : "");
+                ` · 교차검증 ${settled}/${(adj.trail || []).length}건 해결`
+                + (errs ? ` (오류: ${errs})` : "");
         }
 
+        renderTermsheetFieldGroups(draft, inferred, blocked, quotes);
+        renderTermsheetSchedule(draft);
+
+        const warns = (data.warnings || []).slice();
         if (ts.warnings) {
             ts.warnings.hidden = warns.length === 0;
             ts.warnings.innerHTML = "";
             warns.forEach(w => {
                 const d = document.createElement("div");
-                const settled = w.startsWith("\uC7AC\uAC80\uD1A0 \uD569\uC758") || w.startsWith("\uADFC\uAC70 \uD310\uC815");
+                const settled = w.startsWith("재검토 합의") || w.startsWith("근거 판정");
                 d.textContent = `${settled ? "\u2713" : "\u26A0"} ${w}`;
                 if (settled) d.style.color = "#047857";
                 ts.warnings.appendChild(d);
@@ -2063,56 +2035,175 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
 
+        // A field whose quote could not be verified in the document is the one thing
+        // that stops the draft going through unread.
         if (ts.confirm) {
             const hardBlocked = blocked.size > 0;
             ts.confirm.disabled = hardBlocked;
             ts.confirm.textContent = hardBlocked
-                ? `근거 미확인 ${blocked.size}건을 먼저 확인하세요`
-                : "검토 완료 · F9 프라이싱 활성화";
+                ? `근거 미확인 ${blocked.size}건 — 적용 불가`
+                : "확인 · 대시보드에 적용";
+        }
+        if (ts.footNote) {
+            ts.footNote.textContent = blocked.size
+                ? "근거를 확인할 수 없는 항목이 있어 적용할 수 없습니다"
+                : "확인하면 거래조건과 스케줄이 대시보드에 적용되고 바로 프라이싱됩니다";
         }
 
-        tsShow("review");
-        showToast(`Term Sheet에서 거래조건을 불러왔습니다 — 검토 후 확정하세요`, "success");
+        openTermsheetModal();
     }
 
-    function confirmTermsheetTicket() {
-        saveActiveTicketFormData();
-        const t = getActiveTicket();
-        if (!t) return;
-        t.reviewState = "confirmed";
-        // Record what the trader changed - this is the labelled data for measuring accuracy.
-        if (t.termsheetDraft) {
-            Object.keys(t.termsheetDraft).forEach(k => {
-                if (String(t[k]) !== String(t.termsheetDraft[k])) {
-                    t.termsheetEdits.push({ field: k, ai: t.termsheetDraft[k], trader: t[k] });
+    function renderTermsheetFieldGroups(draft, inferred, blocked, quotes) {
+        if (!ts.groups) return;
+        ts.groups.innerHTML = "";
+        TS_GROUPS.forEach(group => {
+            const rows = group.keys.filter(k => draft[k] !== undefined && draft[k] !== "");
+            if (!rows.length) return;
+
+            const box = document.createElement("div");
+            box.className = "ts-group";
+            const head = document.createElement("div");
+            head.className = "ts-group-title";
+            head.textContent = group.title;
+            box.appendChild(head);
+
+            rows.forEach(key => {
+                const srcKey = TS_FIELD_KEY[key] || key;
+                let cls = "ok", note = "";
+                if (blocked.has(srcKey)) {
+                    cls = "blocked"; note = "근거 확인 실패 — 직접 확인 필요";
+                } else if (inferred.has(srcKey)) {
+                    cls = "inferred"; note = "문서에 없음 — 시장 관행 적용";
+                } else if (quotes[srcKey] && quotes[srcKey].quote) {
+                    note = quotes[srcKey].quote;
                 }
+                const row = document.createElement("div");
+                row.className = `ts-row ${cls}`;
+                row.innerHTML = '<span class="k"></span><span class="v"></span><span class="q"></span>';
+                row.querySelector(".k").textContent = TS_LABELS[key] || key;
+                row.querySelector(".v").textContent = draft[key];
+                row.querySelector(".q").textContent = note;
+                if (note) row.title = note;
+                box.appendChild(row);
             });
+            ts.groups.appendChild(box);
+        });
+    }
+
+    function renderTermsheetSchedule(draft) {
+        if (!ts.schedWrap) return;
+        ts.schedWrap.innerHTML = "";
+        const text = (draft.rawPasteText || "").trim();
+
+        if (!text) {
+            ts.schedWrap.innerHTML =
+                '<div class="ts-sched-none">문서에 개별 스케줄이 없습니다 — '
+                + '개시일·만기일과 지급주기로 표준 스케줄을 생성합니다</div>';
+            if (ts.schedSummary) ts.schedSummary.textContent = "표준 스케줄";
+            return;
         }
-        tsPendingTicketId = null;
+
+        const periods = parseClipboardScheduleText(text);
+        const table = document.createElement("table");
+        table.className = "ts-sched-table";
+        table.innerHTML =
+            "<thead><tr><th>#</th><th>시작일</th><th>종료일</th>"
+            + '<th class="num">원금</th><th class="num">금리(%)</th></tr></thead>';
+        const tb = document.createElement("tbody");
+        let prevNotional = null;
+        periods.forEach((p, i) => {
+            const tr = document.createElement("tr");
+            // Mark the steps, so an amortising or accreting profile is visible at a glance
+            // rather than something the trader has to read down the column for.
+            let step = "";
+            if (prevNotional !== null && p.notional !== prevNotional) {
+                step = p.notional < prevNotional ? " step-down" : " step-up";
+            }
+            prevNotional = p.notional;
+            tr.innerHTML =
+                `<td>${i + 1}</td><td>${p.start_date}</td><td>${p.end_date}</td>`
+                + `<td class="num${step}">${formatNumberWithCommas(p.notional.toFixed(0))}</td>`
+                + `<td class="num">${Number(p.fixed_rate_pct).toFixed(4)}</td>`;
+            tb.appendChild(tr);
+        });
+        table.appendChild(tb);
+        ts.schedWrap.appendChild(table);
+
+        if (ts.schedSummary) {
+            const first = periods.length ? periods[0].notional : 0;
+            const last = periods.length ? periods[periods.length - 1].notional : 0;
+            const shape = !periods.length ? ""
+                : last < first ? "상각(Amortising)"
+                : last > first ? "증가(Accreting)"
+                : "원금 고정";
+            const span = first === last
+                ? formatNumberWithCommas(first.toFixed(0))
+                : `${formatNumberWithCommas(first.toFixed(0))} → ${formatNumberWithCommas(last.toFixed(0))}`;
+            ts.schedSummary.textContent = `${periods.length}개 기간 · ${shape} · ${span}`;
+        }
+    }
+
+    function openTermsheetModal() {
+        if (!ts.backdrop) return;
+        ts.backdrop.style.display = "flex";
         tsShow("idle");
+        if (ts.confirm && !ts.confirm.disabled) ts.confirm.focus();
+    }
+
+    function closeTermsheetModal() {
+        if (ts.backdrop) ts.backdrop.style.display = "none";
+        tsPending = null;
+        tsShow("idle");
+    }
+
+    // The trader has read the popup: build the ticket, paint the dashboard, and price it
+    // so the schedule they just approved is the one in the table at the bottom.
+    function confirmTermsheetTicket() {
+        if (!tsPending) return closeTermsheetModal();
+        const data = tsPending.data, draft = tsPending.draft, fileName = tsPending.fileName;
+
+        const targetCurrency = draft.product || "USD";
+        if (state.currency !== targetCurrency) setCurrency(targetCurrency);
+
+        const ticket = getDefaultTicketData(targetCurrency);
+        Object.keys(draft).forEach(k => {
+            if (draft[k] !== undefined && draft[k] !== "") ticket[k] = draft[k];
+        });
+        ticket.alias = `TS · ${draft.customTenorInput || ""} ${draft.position || ""}`.trim();
+        ticket.reviewState = "confirmed";
+        ticket.termsheetName = fileName;
+        ticket.docSha256 = data.doc_sha256;
+        ticket.termsheetEdits = [];
+        ticket.termsheetDraft = JSON.parse(JSON.stringify(draft));
+
+        if (!ticketsStore[targetCurrency]) ticketsStore[targetCurrency] = [];
+        ticketsStore[targetCurrency].push(ticket);
+        activeTicketIdByProduct[targetCurrency] = ticket.id;
+
+        loadTicketToUI(ticket);
+        if (draft.coupon !== undefined && draft.coupon !== "" && elements.couponInput) {
+            elements.couponInput.dataset.userEdited = "true";
+        }
         renderTicketBar();
-        const n = t.termsheetEdits.length;
-        showToast(n ? `확정 (${n}건 수정) — F9로 프라이싱하세요` : "확정 — F9로 프라이싱하세요", "success");
+        closeTermsheetModal();
+
+        const n = (draft.rawPasteText || "").trim()
+            ? parseClipboardScheduleText(draft.rawPasteText).length : 0;
+        showToast(n
+            ? `거래조건과 ${n}개 기간 스케줄 적용 — 프라이싱 중`
+            : "거래조건 적용 — 프라이싱 중", "success");
+
+        // Fills the schedule tables at the foot of the dashboard.
+        calculatePricing();
     }
 
     function discardTermsheetTicket() {
-        const list = ticketsStore[state.currency] || [];
-        const idx = list.findIndex(x => x.id === tsPendingTicketId);
-        if (idx >= 0) {
-            list.splice(idx, 1);
-            if (list.length) {
-                activeTicketIdByProduct[state.currency] = list[list.length - 1].id;
-                loadTicketToUI(getActiveTicket());
-            }
-            renderTicketBar();
-        }
-        tsPendingTicketId = null;
-        tsShow("idle");
+        closeTermsheetModal();
+        showToast("분석 결과를 폐기했습니다", "info");
     }
 
     function isAwaitingTermsheetReview() {
-        const t = getActiveTicket();
-        return Boolean(t && t.reviewState === "pending");
+        return Boolean(tsPending);
     }
 
     if (ts.idle) {
@@ -2138,6 +2229,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (ts.confirm) ts.confirm.addEventListener("click", confirmTermsheetTicket);
     if (ts.discard) ts.discard.addEventListener("click", discardTermsheetTicket);
+    if (ts.close) ts.close.addEventListener("click", discardTermsheetTicket);
+    if (ts.backdrop) {
+        ts.backdrop.addEventListener("click", e => {
+            if (e.target === ts.backdrop) discardTermsheetTicket();
+        });
+    }
+    document.addEventListener("keydown", e => {
+        if (e.key === "Escape" && tsPending) discardTermsheetTicket();
+    });
 
     // Say up front whether extraction can actually run, rather than failing on upload.
     (async function checkTermsheetReady() {
@@ -3140,7 +3240,10 @@ document.addEventListener("DOMContentLoaded", () => {
     function looksLikeScheduleDate(cell) {
         if (!cell) return false;
         const s = String(cell).trim();
-        return /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(s) || /^\d{8}$/.test(s);
+        if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(s)) return true;
+        // A bare 8-digit run is only a date if it reads as one: 20000000 is a
+        // notional, not the zeroth day of the zeroth month of the year 2000.
+        return /^(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(s);
     }
 
     function parseClipboardScheduleText(text) {
@@ -4889,8 +4992,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.key === "F9") {
             e.preventDefault();
             if (isAwaitingTermsheetReview()) {
-                showToast("Term Sheet 조건을 검토·확정한 뒤 F9를 누르세요", "warning");
-                if (ts.review) ts.review.scrollIntoView({ block: "nearest" });
+                showToast("Term Sheet 조건을 검토하고 확인을 누르세요", "warning");
+                if (ts.confirm && !ts.confirm.disabled) ts.confirm.focus();
                 return;
             }
             if (state.currency === "USD_FWD") {

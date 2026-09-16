@@ -159,21 +159,6 @@
                     <button type="button" class="ts-btn-ghost" id="ts-cancel">취소</button>
                 </div>
 
-                <div class="ts-review" id="ts-review" hidden>
-                    <div class="ts-review-head">
-                        <strong id="ts-review-title">추출된 거래조건 검토</strong>
-                        <span class="ts-redaction" id="ts-redaction"></span>
-                    </div>
-                    <div class="ts-warnings" id="ts-warnings" hidden></div>
-                    <div class="ts-fields" id="ts-fields"></div>
-                    <div class="ts-questions" id="ts-questions" hidden></div>
-                    <div class="ts-actions">
-                        <button type="button" class="ts-btn-confirm" id="ts-confirm" disabled>
-                            검토 완료 · F9 프라이싱 활성화
-                        </button>
-                        <button type="button" class="ts-btn-ghost" id="ts-discard">폐기</button>
-                    </div>
-                </div>
             </div>
 
             <!-- Multi-Quote Ticket Workspace Bar (Dynamic Sub-tabs per Product) -->
@@ -1055,6 +1040,57 @@
 
 
     <!-- Modal for Manual Quote Override -->
+    <!-- Term Sheet review popup. Nothing reaches the dashboard until the trader
+         confirms here, so this is the review gate, not a progress notice. -->
+    <div class="modal-backdrop ts-modal-backdrop" id="ts-modal-backdrop" style="display:none;">
+        <div class="ts-modal" role="dialog" aria-modal="true" aria-labelledby="ts-modal-title">
+            <div class="ts-modal-head">
+                <div class="ts-modal-head-main">
+                    <strong id="ts-modal-title">Term Sheet 분석 결과</strong>
+                    <span class="ts-modal-file" id="ts-modal-file"></span>
+                </div>
+                <div class="ts-modal-head-side">
+                    <span class="ts-redaction" id="ts-redaction"></span>
+                    <button type="button" class="btn-close" id="ts-modal-close" title="닫기">&times;</button>
+                </div>
+            </div>
+
+            <div class="ts-modal-body">
+                <div class="ts-warnings" id="ts-warnings" hidden></div>
+
+                <div class="ts-section">
+                    <div class="ts-section-head">
+                        <span class="ts-section-title">거래조건</span>
+                        <span class="ts-legend">
+                            <i class="ts-dot ok"></i>문서 근거
+                            <i class="ts-dot inferred"></i>시장 관행
+                            <i class="ts-dot blocked"></i>확인 필요
+                        </span>
+                    </div>
+                    <div class="ts-groups" id="ts-groups"></div>
+                </div>
+
+                <div class="ts-section">
+                    <div class="ts-section-head">
+                        <span class="ts-section-title">스케줄</span>
+                        <span class="ts-sched-summary" id="ts-sched-summary"></span>
+                    </div>
+                    <div class="ts-sched-wrap" id="ts-sched-wrap"></div>
+                </div>
+
+                <div class="ts-questions" id="ts-questions" hidden></div>
+            </div>
+
+            <div class="ts-modal-foot">
+                <span class="ts-foot-note" id="ts-foot-note"></span>
+                <div class="ts-foot-actions">
+                    <button type="button" class="ts-btn-ghost" id="ts-discard">취소 · 폐기</button>
+                    <button type="button" class="ts-btn-confirm" id="ts-confirm">확인 · 대시보드에 적용</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-backdrop" id="quote-modal-backdrop" style="display:none;">
         <div class="quote-modal">
             <div class="modal-header">

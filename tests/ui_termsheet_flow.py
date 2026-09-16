@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-What the trader actually sees after a term sheet upload: the amortising schedule
-landing in the boxes pricing reads from, and no mojibake anywhere on screen.
+The term sheet path end to end, through the browser: upload, the review popup, and
+what pressing 확인 does to the dashboard.
+
+Nothing should reach the form before the trader confirms, and everything should reach
+it afterwards - the conventions in the leg fields, the schedule in the boxes pricing
+reads, and the priced periods in the table at the foot of the page.
 
 The extract endpoint is stubbed with a canned response, so this exercises the
 browser-side path - which is where the schedule was being lost - without spending
@@ -65,6 +69,18 @@ STUB = {
     },
 }
 
+# What the form should hold once the trader has confirmed, and must NOT hold before.
+EXPECTED = {
+    "param-day-count": "Act/360", "param-payment-freq": "12M",
+    "param-convention": "Modified Following", "param-stub": "Short in arrears",
+    "param-adjust": "Adjust", "param-pay-cal": "NYB",
+    "leg2-day-count": "Act/360", "leg2-payment-freq": "12M",
+    "notional-display": "100,000,000", "custom-tenor-input": "5Y",
+    "effective-date": "2026-09-15", "maturity-date": "2031-09-15",
+    "fixed-coupon": "3.6500",
+}
+NOTIONALS = ("100000000", "80000000", "60000000", "40000000", "20000000")
+
 # Replacement char, or a lone '?' pressed against Hangul - the shape encoding damage takes.
 MOJIBAKE = re.compile(r"[�]|[?][가-힣]|[가-힣][?]")
 
@@ -78,6 +94,10 @@ def wait_port(port, timeout=45):
                 return True
         time.sleep(0.5)
     return False
+
+
+def scan_mojibake(page):
+    return sorted(set(m.group(0) for m in MOJIBAKE.finditer(page.locator("body").inner_text())))
 
 
 def main():
@@ -94,6 +114,10 @@ def main():
          "--port", str(PORT), "--log-level", "warning"],
         cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     fails = []
+
+    def ok(msg):
+        print(f"  PASS  {msg}")
+
     try:
         if not wait_port(PORT):
             print("  FAIL  server did not start")
@@ -106,9 +130,8 @@ def main():
             except Exception:
                 browser = p.chromium.launch()
             page = browser.new_page(viewport={"width": 1680, "height": 1050})
-            errors, console = [], []
+            errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
-            page.on("console", lambda m: console.append(m.text))
 
             if not live:
                 page.route("**/api/termsheet/extract",
@@ -119,102 +142,140 @@ def main():
             page.goto(f"http://127.0.0.1:{PORT}/", wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(4000)
 
-            body = page.locator("body").inner_text()
-            bad = sorted(set(m.group(0) for m in MOJIBAKE.finditer(body)))
+            baseline = {k: (page.locator("#" + k).input_value()
+                            if page.locator("#" + k).count() else None)
+                        for k in EXPECTED}
+
+            bad = scan_mojibake(page)
             if bad:
                 fails.append(f"초기 화면 글자 깨짐: {bad[:6]}")
             else:
-                print("  PASS  초기 화면 글자 깨짐 없음")
+                ok("초기 화면 글자 깨짐 없음")
 
+            # ---- upload -> popup ------------------------------------------------
             page.set_input_files("#ts-file-input", ts_path)
             try:
-                page.wait_for_selector("#ts-review:not([hidden])",
+                page.wait_for_selector("#ts-modal-backdrop", state="visible",
                                        timeout=240000 if live else 20000)
             except Exception:
-                fails.append("검토 패널이 나타나지 않음")
+                fails.append("검토 팝업이 열리지 않음")
                 for f in fails:
                     print(f"  FAIL  {f}")
                 browser.close()
                 return 1
-            page.wait_for_timeout(2000)
-            print("  PASS  업로드 후 검토 패널 표시됨")
+            page.wait_for_timeout(1200)
+            ok("업로드 후 검토 팝업 열림")
+
+            rows = page.locator("#ts-groups .ts-row")
+            if rows.count() < 15:
+                fails.append(f"팝업 거래조건 항목 {rows.count()}개 (15개 이상이어야 함)")
+            else:
+                ok(f"팝업에 거래조건 {rows.count()}개 항목 표시")
+
+            sched_rows = page.locator(".ts-sched-table tbody tr")
+            if sched_rows.count() != 5:
+                fails.append(f"팝업 스케줄 {sched_rows.count()}행 (5행이어야 함)")
+            else:
+                ok("팝업에 스케줄 5개 기간 표시")
+                shown = page.locator(".ts-sched-table").inner_text().replace(",", "")
+                missing = [n for n in NOTIONALS if n not in shown]
+                if missing:
+                    fails.append(f"팝업 스케줄 원금 누락: {missing}")
+                else:
+                    ok("팝업 스케줄에 상각 원금 5단계 표시")
+
+            summary = page.locator("#ts-sched-summary").inner_text()
+            if "상각" not in summary:
+                fails.append(f"스케줄 요약이 상각을 알리지 않음: {summary!r}")
+            else:
+                ok(f"스케줄 요약: {summary!r}")
+
+            # Nothing may reach the dashboard before the trader presses 확인.
+            leaked = [k for k in EXPECTED
+                      if page.locator("#" + k).count()
+                      and page.locator("#" + k).input_value() != baseline[k]]
+            if page.locator("#rc-paste-input-leg1").input_value().strip():
+                leaked.append("rc-paste-input-leg1")
+            if leaked:
+                fails.append(f"확인 전에 이미 대시보드에 반영됨: {leaked}")
+            else:
+                ok("확인 전에는 대시보드가 바뀌지 않음")
+
+            bad = scan_mojibake(page)
+            if bad:
+                fails.append(f"팝업 글자 깨짐: {bad[:8]}")
+            else:
+                ok("팝업 글자 깨짐 없음")
+
+            if shot:
+                page.screenshot(path=shot, full_page=False)
+                print(f"  --    스크린샷(팝업): {shot}")
+
+            # ---- confirm -> dashboard -------------------------------------------
+            page.click("#ts-confirm")
+            page.wait_for_selector("#ts-modal-backdrop", state="hidden", timeout=10000)
+            page.wait_for_timeout(3500)
+            ok("확인 후 팝업 닫힘")
+
+            wrong = [f"{k}: {page.locator('#' + k).input_value()!r} (기대 {v!r})"
+                     for k, v in EXPECTED.items()
+                     if page.locator("#" + k).count()
+                     and page.locator("#" + k).input_value() != v]
+            if wrong:
+                fails.append("거래조건 미반영 — " + "; ".join(wrong))
+            else:
+                ok(f"거래조건 {len(EXPECTED)}개 항목 폼에 반영됨")
 
             leg1 = page.locator("#rc-paste-input-leg1").input_value()
             lines = [l for l in leg1.splitlines() if l.strip()]
             if len(lines) != 5:
                 fails.append(f"Leg1 스케줄 {len(lines)}개 기간 (5개여야 함)")
             else:
-                print(f"  PASS  Leg1 스케줄 {len(lines)}개 기간 반영됨")
+                ok(f"Leg1 스케줄 {len(lines)}개 기간 반영됨")
                 flat = leg1.replace(",", "")
-                missing = [n for n in ("100000000", "80000000", "60000000",
-                                       "40000000", "20000000") if n not in flat]
+                missing = [n for n in NOTIONALS if n not in flat]
                 if missing:
                     fails.append(f"상각 원금 누락: {missing}")
                 else:
-                    print("  PASS  상각 원금 5단계 모두 반영됨")
+                    ok("상각 원금 5단계 모두 반영됨")
 
-            # The conventions have to land in the form the trader reads and pricing
-            # sends, not only in the review panel.
-            EXPECTED = {
-                "param-day-count": "Act/360", "param-payment-freq": "12M",
-                "param-convention": "Modified Following", "param-stub": "Short in arrears",
-                "param-adjust": "Adjust", "param-pay-cal": "NYB",
-                "leg2-day-count": "Act/360", "leg2-payment-freq": "12M",
-                "notional-display": "100,000,000", "custom-tenor-input": "5Y",
-                "effective-date": "2026-09-15", "maturity-date": "2031-09-15",
-                "fixed-coupon": "3.6500",
-            }
-            wrong = []
-            for el, want in EXPECTED.items():
-                loc = page.locator("#" + el)
-                got = loc.input_value() if loc.count() else "<없음>"
-                if got != want:
-                    wrong.append(f"{el}: {got!r} (기대 {want!r})")
-            if wrong:
-                fails.append("거래조건 미반영 — " + "; ".join(wrong))
-            else:
-                print(f"  PASS  거래조건 {len(EXPECTED)}개 항목 폼에 반영됨")
-
-            # Badges are how the trader confirms the schedule is live before F9.
             badge = page.locator("#schedule-mode-badge")
             btxt = badge.inner_text() if badge.count() else ""
             if "custom" not in btxt.lower():   # the badge is CSS-uppercased
                 fails.append(f"스케줄 모드 배지가 커스텀으로 바뀌지 않음: {btxt!r}")
             else:
-                print(f"  PASS  스케줄 모드 배지: {btxt!r}")
-            summary = page.locator("#rc-active-summary")
-            if summary.count() and summary.is_visible():
-                print(f"  PASS  스케줄 활성 표시: {summary.inner_text()!r}")
-            else:
-                fails.append("스케줄 활성 표시가 보이지 않음")
+                ok(f"스케줄 모드 배지: {btxt!r}")
 
-            content = page.locator("#paste-schedule-content")
-            if content.count() == 0:
-                fails.append("스케줄 카드(#paste-schedule-content)를 찾지 못함")
-            elif not content.is_visible():
-                fails.append("스케줄 카드가 접혀 있어 트레이더가 볼 수 없음")
+            # The point of the whole flow: the approved schedule, priced, at the foot
+            # of the dashboard.
+            body_rows = page.locator("#dual-table-body tr:not(.total-row)")
+            if body_rows.count() != 5:
+                fails.append(f"하단 스케줄 {body_rows.count()}행 (5행이어야 함)")
             else:
-                print("  PASS  스케줄 카드 펼쳐짐")
-
-            body2 = page.locator("body").inner_text()
-            bad2 = sorted(set(m.group(0) for m in MOJIBAKE.finditer(body2)))
-            if bad2:
-                fails.append(f"업로드 후 글자 깨짐: {bad2[:8]}")
-            else:
-                print("  PASS  업로드 후 글자 깨짐 없음")
+                ok("하단 Dual-Leg 스케줄에 5개 기간 적용됨")
+                txt = page.locator("#dual-table-body").inner_text().replace(",", "")
+                missing = [n for n in NOTIONALS if n not in txt]
+                if missing:
+                    fails.append(f"하단 스케줄 원금 누락: {missing}")
+                else:
+                    ok("하단 스케줄에 상각 원금 5단계 반영됨")
 
             alias = page.locator("#ticket-alias-input").input_value()
             if MOJIBAKE.search(alias) or "쨌" in alias:
                 fails.append(f"티켓 별칭 글자 깨짐: {alias!r}")
             else:
-                print(f"  PASS  티켓 별칭 정상: {alias!r}")
+                ok(f"티켓 별칭 정상: {alias!r}")
 
-            fields = page.locator(".ts-field").count()
-            print(f"  --    검토 필드 {fields}개")
+            bad = scan_mojibake(page)
+            if bad:
+                fails.append(f"적용 후 글자 깨짐: {bad[:8]}")
+            else:
+                ok("적용 후 글자 깨짐 없음")
 
             if shot:
-                page.screenshot(path=shot, full_page=False)
-                print(f"  --    스크린샷: {shot}")
+                after = shot.replace(".png", "_applied.png")
+                page.screenshot(path=after, full_page=False)
+                print(f"  --    스크린샷(적용 후): {after}")
 
             if errors:
                 fails.append(f"JS 오류: {errors[:3]}")
@@ -231,5 +292,5 @@ def main():
 
 
 if __name__ == "__main__":
-    print("\n=== UI: Term Sheet 업로드 → 스케줄 반영 / 글자 깨짐 ===")
+    print("\n=== UI: Term Sheet 업로드 → 검토 팝업 → 확인 → 대시보드 적용 ===")
     sys.exit(main())

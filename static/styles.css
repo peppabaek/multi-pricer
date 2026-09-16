@@ -368,71 +368,151 @@ body {
 @keyframes ts-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ts-spinner { animation-duration: 2.4s; } }
 
-.ts-review {
-    border: 1.5px solid #cbd5e1; border-radius: 6px;
-    background: #fff; padding: 12px 14px;
+/* ---- Term Sheet review popup ------------------------------------------------
+   The trader's gate between AI extraction and the dashboard: conditions grouped
+   the way the form groups them, and the schedule shown as a schedule. */
+.ts-modal-backdrop {
+    display: none;
+    position: fixed; inset: 0; z-index: 900;
+    background: rgba(15, 23, 42, .55);
+    align-items: center; justify-content: center;
+    padding: 24px;
 }
-.ts-review-head {
+.ts-modal {
+    display: flex; flex-direction: column;
+    width: min(1040px, 100%); max-height: min(88vh, 900px);
+    background: #fff; border: 1px solid #cbd5e1; border-radius: 8px;
+    box-shadow: 0 18px 48px rgba(15, 23, 42, .28);
+    overflow: hidden;
+}
+.ts-modal-head {
     display: flex; align-items: center; justify-content: space-between;
-    gap: 10px; margin-bottom: 8px; flex-wrap: wrap;
+    gap: 12px; flex-wrap: wrap;
+    padding: 11px 16px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;
 }
-.ts-review-head strong { font-size: 12.5px; font-weight: 800; color: #0f172a; }
+.ts-modal-head-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.ts-modal-head-main strong { font-size: 13px; font-weight: 800; color: #0f172a; }
+.ts-modal-file {
+    font-size: 10.5px; color: #64748b; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+.ts-modal-head-side { display: flex; align-items: center; gap: 10px; }
 .ts-redaction {
     font-size: 10px; font-weight: 700; color: #047857;
     background: #ecfdf5; border: 1px solid #a7f3d0;
     padding: 2px 7px; border-radius: 4px;
 }
 
+.ts-modal-body { padding: 14px 16px; overflow-y: auto; flex: 1; }
+
+.ts-section + .ts-section { margin-top: 16px; }
+.ts-section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 10px; flex-wrap: wrap; margin-bottom: 7px;
+    border-bottom: 1px solid #e2e8f0; padding-bottom: 5px;
+}
+.ts-section-title {
+    font-size: 10px; font-weight: 800; letter-spacing: .08em;
+    text-transform: uppercase; color: #334155;
+}
+.ts-legend { font-size: 9.5px; color: #94a3b8; display: flex; align-items: center; gap: 9px; }
+.ts-dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    margin-right: 3px; vertical-align: -1px;
+}
+.ts-dot.ok { background: #059669; }
+.ts-dot.inferred { background: #d97706; }
+.ts-dot.blocked { background: #dc2626; }
+
+.ts-groups {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px;
+}
+.ts-group-title {
+    font-size: 9.5px; font-weight: 800; letter-spacing: .06em;
+    text-transform: uppercase; color: #64748b; margin-bottom: 4px;
+}
+.ts-row {
+    display: grid; grid-template-columns: 96px 1fr; column-gap: 8px;
+    align-items: baseline;
+    border: 1px solid #e2e8f0; border-left-width: 3px;
+    border-radius: 4px; padding: 4px 8px; background: #f8fafc;
+}
+.ts-row + .ts-row { margin-top: 4px; }
+.ts-row.ok       { border-left-color: #059669; }
+.ts-row.inferred { border-left-color: #d97706; background: #fffbeb; }
+.ts-row.blocked  { border-left-color: #dc2626; background: #fef2f2; }
+.ts-row .k {
+    font-size: 9.5px; letter-spacing: .03em; color: #64748b; font-weight: 700;
+}
+.ts-row .v {
+    font-size: 12px; font-weight: 700; color: #0f172a;
+    font-variant-numeric: tabular-nums; word-break: break-word;
+}
+.ts-row .q {
+    grid-column: 2; font-size: 9.5px; color: #94a3b8; margin-top: 1px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ts-row.inferred .q { color: #b45309; }
+.ts-row.blocked .q { color: #b91c1c; }
+
+.ts-sched-summary { font-size: 10.5px; font-weight: 700; color: #1d4ed8; }
+.ts-sched-wrap { max-height: 300px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 5px; }
+.ts-sched-none { padding: 14px; font-size: 11px; color: #64748b; text-align: center; }
+.ts-sched-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.ts-sched-table th {
+    position: sticky; top: 0; z-index: 1;
+    background: #f1f5f9; color: #475569; font-size: 9.5px; font-weight: 800;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: 5px 9px; text-align: left; border-bottom: 1px solid #cbd5e1;
+}
+.ts-sched-table td {
+    padding: 4px 9px; border-bottom: 1px solid #f1f5f9; color: #0f172a;
+    font-variant-numeric: tabular-nums;
+}
+.ts-sched-table .num { text-align: right; }
+.ts-sched-table tbody tr:nth-child(even) { background: #fbfdff; }
+/* A notional that moved: the whole point of uploading a rollercoaster term sheet. */
+.ts-sched-table td.step-down { color: #b91c1c; font-weight: 700; }
+.ts-sched-table td.step-up   { color: #1d4ed8; font-weight: 700; }
+
 .ts-warnings {
-    margin-bottom: 8px; padding: 8px 10px; border-radius: 5px;
+    margin-bottom: 10px; padding: 8px 10px; border-radius: 5px;
     background: #fffbeb; border: 1px solid #fcd34d;
     font-size: 10.5px; color: #92400e; line-height: 1.6;
 }
 .ts-warnings div + div { margin-top: 3px; }
-
-.ts-fields {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    gap: 6px; max-height: 260px; overflow-y: auto;
-}
-.ts-field {
-    border: 1px solid #e2e8f0; border-left-width: 3px;
-    border-radius: 4px; padding: 5px 8px; background: #f8fafc;
-}
-.ts-field.ok      { border-left-color: #059669; }
-.ts-field.inferred{ border-left-color: #d97706; background: #fffbeb; }
-.ts-field.blocked { border-left-color: #dc2626; background: #fef2f2; }
-.ts-field .k {
-    display: block; font-size: 9.5px; letter-spacing: .04em;
-    text-transform: uppercase; color: #64748b; font-weight: 700;
-}
-.ts-field .v {
-    display: block; font-size: 12px; font-weight: 700; color: #0f172a;
-    font-variant-numeric: tabular-nums; word-break: break-word;
-}
-.ts-field .q {
-    display: block; font-size: 9.5px; color: #94a3b8; margin-top: 2px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.ts-field.inferred .q { color: #b45309; }
-.ts-field.blocked .q { color: #b91c1c; }
-
 .ts-questions {
-    margin-top: 8px; padding: 8px 10px; border-radius: 5px;
+    margin-top: 12px; padding: 8px 10px; border-radius: 5px;
     background: #f1f5f9; border: 1px solid #cbd5e1;
     font-size: 10.5px; color: #334155; line-height: 1.6;
 }
 
-.ts-actions { display: flex; gap: 8px; margin-top: 10px; }
+.ts-modal-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
+    padding: 11px 16px; border-top: 1px solid #e2e8f0; background: #f8fafc;
+}
+.ts-foot-note { font-size: 10.5px; color: #64748b; }
+.ts-foot-actions { display: flex; gap: 8px; }
 .ts-btn-confirm {
-    flex: 1; padding: 9px 14px; border-radius: 5px; cursor: pointer;
+    padding: 9px 18px; border-radius: 5px; cursor: pointer;
     background: #059669; border: 1.5px solid #047857; color: #fff;
     font-size: 11.5px; font-weight: 800; transition: all .15s ease;
 }
+.ts-btn-confirm:hover:not(:disabled) { background: #047857; }
 .ts-btn-confirm:disabled { background: #cbd5e1; border-color: #94a3b8; cursor: not-allowed; }
 .ts-btn-ghost {
-    padding: 9px 14px; border-radius: 5px; cursor: pointer;
+    padding: 9px 16px; border-radius: 5px; cursor: pointer;
     background: #fff; border: 1.5px solid #cbd5e1; color: #475569;
     font-size: 11.5px; font-weight: 700;
+}
+.ts-btn-ghost:hover { border-color: #94a3b8; background: #f8fafc; }
+
+@media (max-width: 720px) {
+    .ts-modal-backdrop { padding: 10px; }
+    .ts-groups { grid-template-columns: 1fr; }
+    .ts-modal-foot { flex-direction: column; align-items: stretch; }
+    .ts-foot-actions { justify-content: flex-end; }
 }
 
 /* Ticket awaiting termsheet review */
