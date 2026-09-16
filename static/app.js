@@ -2006,7 +2006,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     hint = quotes[srcKey].quote;
                 }
                 const val = key === "rawPasteText"
-                    ? `${String(draft[key]).split("\n").length}媛?湲곌컙`
+                    ? `${String(draft[key]).split("\n").length}개 기간`
                     : draft[key];
                 const card = document.createElement("div");
                 card.className = `ts-field ${cls}`;
@@ -2248,6 +2248,44 @@ document.addEventListener("DOMContentLoaded", () => {
     // --------------------------------------------------------------------------
     // 7. Schedule Tables & Custom Paste Management
     // --------------------------------------------------------------------------
+    // A schedule that arrives with a ticket - extracted from a term sheet, or a saved
+    // ticket reopened - has to look as loaded as one the trader pasted by hand. These
+    // badges are how they confirm the custom schedule is live before pressing F9;
+    // until now they only appeared after a price, so a freshly extracted schedule sat
+    // in the box looking inert.
+    function reflectLoadedSchedule() {
+        const l1 = elements.rcPasteInputLeg1 ? elements.rcPasteInputLeg1.value.trim() : "";
+        const l2 = elements.rcPasteInputLeg2 ? elements.rcPasteInputLeg2.value.trim() : "";
+        const p1 = l1 ? parseClipboardScheduleText(l1) : [];
+        const p2 = l2 ? parseClipboardScheduleText(l2) : [];
+        const n = Math.max(p1.length, p2.length);
+
+        const setBadge = (badge, count, label) => {
+            if (badge) badge.style.display = count ? "inline-block" : "none";
+            if (label && count) label.textContent = `${count} Periods`;
+        };
+        setBadge(elements.rcStatusBadgeLeg1, p1.length, elements.rcPeriodCountLeg1);
+        setBadge(elements.rcStatusBadgeLeg2, p2.length, elements.rcPeriodCountLeg2);
+
+        if (elements.rcStatusBadge) elements.rcStatusBadge.style.display = n ? "inline-block" : "none";
+        const pill = document.getElementById("rc-period-count-pill");
+        if (pill) pill.style.display = n ? "inline-block" : "none";
+        if (elements.rcPeriodCount && n) elements.rcPeriodCount.textContent = String(n);
+        if (elements.rcActiveSummary) {
+            elements.rcActiveSummary.style.display = n ? "inline-block" : "none";
+            if (n) elements.rcActiveSummary.textContent = `✓ Custom Schedule Loaded (${n} Periods)`;
+        }
+        if (elements.periodCountBadge && n) {
+            elements.periodCountBadge.textContent = `${n} Periods (Custom)`;
+        }
+
+        // Pricing sends the raw text and the server re-parses it, so this copy only
+        // drives the schedule-mode indicator. Leave a schedule that came in by another
+        // route alone when the boxes are empty.
+        if (n) state.customSchedule = p1.length ? p1 : p2;
+        updateScheduleModeUI();
+    }
+
     function updateScheduleModeUI() {
         const isCustom = state.customSchedule !== null && state.customSchedule.length > 0;
         if (isCustom) {
@@ -3099,6 +3137,12 @@ document.addEventListener("DOMContentLoaded", () => {
         elements.btnCopyExcel.addEventListener("click", copyScheduleToClipboard);
     }
 
+    function looksLikeScheduleDate(cell) {
+        if (!cell) return false;
+        const s = String(cell).trim();
+        return /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(s) || /^\d{8}$/.test(s);
+    }
+
     function parseClipboardScheduleText(text) {
         if (!text || !text.trim()) return [];
         const lines = text.trim().split(/\r?\n/);
@@ -3119,12 +3163,29 @@ document.addEventListener("DOMContentLoaded", () => {
                 continue; // Skip header row
             }
 
+            // Two shapes reach this box. The marketer's Excel carries a pay date,
+            // [Start, End, Pay, Notional, Fixing]; a term sheet has none to carry,
+            // [Start, End, Notional, Rate]. Tell them apart by whether the third
+            // column is a date - counting columns gets it wrong either way.
+            const hasPayCol = looksLikeScheduleDate(cleanCols[2]);
+            const nomIdx = hasPayCol ? 3 : 2;
+
             let st = cleanCols[0];
             let ed = cleanCols[1] || st;
-            let pay = cleanCols[2] || ed;
-            let notional = cleanCols[3] ? parseFormattedNumber(cleanCols[3]) : baseNotional;
-            let rate = cleanCols[4] ? parseFloat(cleanCols[4]) : baseCoupon;
-            let spread = cleanCols[5] ? parseFloat(cleanCols[5]) : 0.0;
+            let pay = hasPayCol ? cleanCols[2] : ed;
+            let notional = cleanCols[nomIdx] ? parseFormattedNumber(cleanCols[nomIdx]) : baseNotional;
+            let rate = baseCoupon;
+            let spread = 0.0;
+            // Whatever follows the notional may be a fixing date, a rate or a spread,
+            // in any order. Classify by what it is, the way the pricing engine does.
+            for (let c = nomIdx + 1; c < cleanCols.length; c++) {
+                const cell = cleanCols[c];
+                if (!cell || looksLikeScheduleDate(cell)) continue;
+                const val = parseFloat(cell.replace(/,/g, "").replace("%", "").replace(/bp/i, ""));
+                if (isNaN(val)) continue;
+                if (/bp/i.test(cell) || Math.abs(val) > 25.0) spread = val;
+                else rate = val;
+            }
 
             // Normalize Date formats (YYYY-MM-DD)
             try {
@@ -4496,7 +4557,7 @@ document.addEventListener("DOMContentLoaded", () => {
             // card, so open it when there is one to look at.
             if (paste.trim()) revealPasteCard();
             state.customSchedule = ticket.customSchedule || null;
-            updateScheduleModeUI();
+            reflectLoadedSchedule();
 
             if (ticket.lastPricingResult) {
                 state.pricingResult = ticket.lastPricingResult;

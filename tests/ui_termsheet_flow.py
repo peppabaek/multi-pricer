@@ -11,6 +11,13 @@ an API call or depending on a model being reachable.
 """
 import sys, os, re, time, json, socket, subprocess
 
+# The pass/fail lines carry Korean and check marks; a cp949 console would abort on them.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, HERE)
@@ -122,7 +129,7 @@ def main():
             page.set_input_files("#ts-file-input", ts_path)
             try:
                 page.wait_for_selector("#ts-review:not([hidden])",
-                                       timeout=150000 if live else 20000)
+                                       timeout=240000 if live else 20000)
             except Exception:
                 fails.append("검토 패널이 나타나지 않음")
                 for f in fails:
@@ -145,6 +152,41 @@ def main():
                     fails.append(f"상각 원금 누락: {missing}")
                 else:
                     print("  PASS  상각 원금 5단계 모두 반영됨")
+
+            # The conventions have to land in the form the trader reads and pricing
+            # sends, not only in the review panel.
+            EXPECTED = {
+                "param-day-count": "Act/360", "param-payment-freq": "12M",
+                "param-convention": "Modified Following", "param-stub": "Short in arrears",
+                "param-adjust": "Adjust", "param-pay-cal": "NYB",
+                "leg2-day-count": "Act/360", "leg2-payment-freq": "12M",
+                "notional-display": "100,000,000", "custom-tenor-input": "5Y",
+                "effective-date": "2026-09-15", "maturity-date": "2031-09-15",
+                "fixed-coupon": "3.6500",
+            }
+            wrong = []
+            for el, want in EXPECTED.items():
+                loc = page.locator("#" + el)
+                got = loc.input_value() if loc.count() else "<없음>"
+                if got != want:
+                    wrong.append(f"{el}: {got!r} (기대 {want!r})")
+            if wrong:
+                fails.append("거래조건 미반영 — " + "; ".join(wrong))
+            else:
+                print(f"  PASS  거래조건 {len(EXPECTED)}개 항목 폼에 반영됨")
+
+            # Badges are how the trader confirms the schedule is live before F9.
+            badge = page.locator("#schedule-mode-badge")
+            btxt = badge.inner_text() if badge.count() else ""
+            if "custom" not in btxt.lower():   # the badge is CSS-uppercased
+                fails.append(f"스케줄 모드 배지가 커스텀으로 바뀌지 않음: {btxt!r}")
+            else:
+                print(f"  PASS  스케줄 모드 배지: {btxt!r}")
+            summary = page.locator("#rc-active-summary")
+            if summary.count() and summary.is_visible():
+                print(f"  PASS  스케줄 활성 표시: {summary.inner_text()!r}")
+            else:
+                fails.append("스케줄 활성 표시가 보이지 않음")
 
             content = page.locator("#paste-schedule-content")
             if content.count() == 0:
