@@ -2018,7 +2018,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         renderTermsheetFieldGroups(draft, inferred, blocked, quotes);
-        renderTermsheetSchedule(draft);
+        renderTermsheetSchedule(draft, data.schedule_preview);
 
         const warns = (data.warnings || []).slice();
         if (ts.warnings) {
@@ -2104,7 +2104,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    function renderTermsheetSchedule(draft) {
+    function renderTermsheetSchedule(draft, preview) {
         if (!ts.schedWrap) return;
         ts.schedWrap.innerHTML = "";
         const text = (draft.rawPasteText || "").trim();
@@ -2117,43 +2117,64 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        const periods = parseClipboardScheduleText(text);
+        // The server resolves pay and fixing dates with the real holiday calendars, so
+        // the trader approves the dates the trade will actually use. Fall back to the
+        // document's own rows only if that preview could not be built.
+        const rows = (preview && preview.length) ? preview : parseClipboardScheduleText(text)
+            .map((p, i) => ({
+                no: i + 1, start_date: p.start_date, end_date: p.end_date,
+                pay_date: p.pay_date, notional: p.notional,
+                fixed_rate_pct: p.fixed_rate_pct, fixing_date: null,
+            }));
+        const resolved = Boolean(preview && preview.length);
+
         const table = document.createElement("table");
         table.className = "ts-sched-table";
         table.innerHTML =
-            "<thead><tr><th>#</th><th>시작일</th><th>종료일</th>"
-            + '<th class="num">원금</th><th class="num">금리(%)</th></tr></thead>';
+            "<thead><tr><th>#</th><th>Start date</th><th>End date</th><th>Pay date</th>"
+            + '<th class="num">Nominal</th><th>Fixing date</th>'
+            + '<th class="num">Rate (%)</th></tr></thead>';
+
         const tb = document.createElement("tbody");
-        let prevNotional = null;
-        periods.forEach((p, i) => {
-            const tr = document.createElement("tr");
-            // Mark the steps, so an amortising or accreting profile is visible at a glance
-            // rather than something the trader has to read down the column for.
+        let prev = null;
+        rows.forEach((r, i) => {
+            // Mark the steps, so an amortising or accreting profile is visible at a
+            // glance rather than something to read down the column for.
             let step = "";
-            if (prevNotional !== null && p.notional !== prevNotional) {
-                step = p.notional < prevNotional ? " step-down" : " step-up";
+            if (prev !== null && r.notional !== prev) {
+                step = r.notional < prev ? " step-down" : " step-up";
             }
-            prevNotional = p.notional;
+            prev = r.notional;
+            const rolled = r.pay_date_rolled ? ' class="rolled" title="휴일·주말이라 영업일로 조정됨"' : "";
+            const tr = document.createElement("tr");
             tr.innerHTML =
-                `<td>${i + 1}</td><td>${p.start_date}</td><td>${p.end_date}</td>`
-                + `<td class="num${step}">${formatNumberWithCommas(p.notional.toFixed(0))}</td>`
-                + `<td class="num">${Number(p.fixed_rate_pct).toFixed(4)}</td>`;
+                `<td>${r.no || i + 1}</td>`
+                + `<td>${r.start_date}</td><td>${r.end_date}</td>`
+                + `<td${rolled}>${r.pay_date || "-"}${r.pay_date_rolled ? " \u2192" : ""}</td>`
+                + `<td class="num${step}">${formatNumberWithCommas(Number(r.notional).toFixed(0))}</td>`
+                + `<td>${r.fixing_date || "-"}</td>`
+                + `<td class="num">${r.fixed_rate_pct === null || r.fixed_rate_pct === undefined
+                    ? "-" : Number(r.fixed_rate_pct).toFixed(4)}</td>`;
             tb.appendChild(tr);
         });
         table.appendChild(tb);
         ts.schedWrap.appendChild(table);
 
         if (ts.schedSummary) {
-            const first = periods.length ? periods[0].notional : 0;
-            const last = periods.length ? periods[periods.length - 1].notional : 0;
-            const shape = !periods.length ? ""
+            const first = rows.length ? Number(rows[0].notional) : 0;
+            const last = rows.length ? Number(rows[rows.length - 1].notional) : 0;
+            const shape = !rows.length ? ""
                 : last < first ? "상각(Amortising)"
                 : last > first ? "증가(Accreting)"
                 : "원금 고정";
             const span = first === last
                 ? formatNumberWithCommas(first.toFixed(0))
                 : `${formatNumberWithCommas(first.toFixed(0))} → ${formatNumberWithCommas(last.toFixed(0))}`;
-            ts.schedSummary.textContent = `${periods.length}개 기간 · ${shape} · ${span}`;
+            const rolledCount = rows.filter(r => r.pay_date_rolled).length;
+            ts.schedSummary.textContent =
+                `${rows.length}개 기간 · ${shape} · ${span}`
+                + (rolledCount ? ` · 지급일 ${rolledCount}건 영업일 조정` : "")
+                + (resolved ? "" : " · 지급일 미확정");
         }
     }
 

@@ -469,10 +469,11 @@ body {
 .ts-sched-table { width: 100%; border-collapse: collapse; font-size: 11px; }
 .ts-sched-table th {
     position: sticky; top: 0; z-index: 1;
-    background: #f1f5f9; color: #475569; font-size: 9.5px; font-weight: 800;
-    letter-spacing: .04em; text-transform: uppercase;
-    padding: 5px 9px; text-align: left; border-bottom: 1px solid #cbd5e1;
+    background: #f1f5f9; color: #334155; font-size: 10.5px; font-weight: 700;
+    padding: 6px 10px; text-align: left; border-bottom: 1px solid #cbd5e1;
+    white-space: nowrap;
 }
+.ts-sched-table th.num { text-align: right; }
 .ts-sched-table td {
     padding: 4px 9px; border-bottom: 1px solid #f1f5f9; color: #0f172a;
     font-variant-numeric: tabular-nums;
@@ -480,6 +481,8 @@ body {
 .ts-sched-table .num { text-align: right; }
 .ts-sched-table tbody tr:nth-child(even) { background: #fbfdff; }
 /* A notional that moved: the whole point of uploading a rollercoaster term sheet. */
+/* A pay date the calendar had to move off a weekend or holiday. */
+.ts-sched-table td.rolled { color: #b45309; font-weight: 700; }
 .ts-sched-table td.step-down { color: #b91c1c; font-weight: 700; }
 .ts-sched-table td.step-up   { color: #1d4ed8; font-weight: 700; }
 

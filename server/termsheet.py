@@ -778,6 +778,64 @@ def to_ticket_draft(trade: ExtractedTrade) -> Dict[str, Any]:
     return {"draft": draft, "inferred_fields": inferred}
 
 
+def schedule_preview(draft: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    The extracted schedule in the marketer's own columns, resolved the way the pricer
+    will resolve it: Start / End / Pay / Nominal / Fixing.
+
+    A term sheet states accrual periods, not settlement mechanics - the pay date is
+    rolled onto a business day and the fixing date is the fixing offset applied to the
+    period start. Showing the raw rows instead would have the trader approve dates that
+    are not the ones the trade will use.
+    """
+    raw = (draft.get("rawPasteText") or "").strip()
+    if not raw:
+        return []
+    try:
+        from common_pricer.rollercoaster_engine import parse_rollercoaster_paste
+        from server.calendar_manager import resolve_custom_pay_date, compute_fixing_date
+
+        eff = datetime.datetime.strptime(draft["effectiveDate"], "%Y-%m-%d").date()
+        notional = float(str(draft.get("notionalDisplay", "0")).replace(",", "") or 0)
+        coupon = float(draft.get("coupon") or 0)
+        spread = float(draft.get("spreadBp") or 0)
+        periods = parse_rollercoaster_paste(
+            raw_text=raw, effective_date=eff, default_notional=notional,
+            default_coupon_pct=coupon, default_spread_bp=spread,
+            currency=draft.get("product", "USD"))
+
+        conv = draft.get("leg1Convention") or "Modified Following"
+        cal = draft.get("leg1PayCal") or None
+        fix_cal = draft.get("fixCal") or cal
+        try:
+            fix_day = int(draft.get("fixDay"))
+        except (TypeError, ValueError):
+            fix_day = 0
+
+        rows = []
+        for i, per in enumerate(periods, 1):
+            start = datetime.datetime.strptime(per["start_date"], "%Y-%m-%d").date()
+            end = datetime.datetime.strptime(per["end_date"], "%Y-%m-%d").date()
+            pay = resolve_custom_pay_date(per, end, conv, cal)
+            fixing = compute_fixing_date(start, fix_day, fix_cal)
+            rows.append({
+                "no": i,
+                "start_date": start.isoformat(),
+                "end_date": end.isoformat(),
+                "pay_date": pay.isoformat(),
+                "pay_date_rolled": pay != end and not per.get("pay_date_explicit"),
+                "notional": per["notional"],
+                "fixing_date": fixing.isoformat(),
+                "fixed_rate_pct": per.get("fixed_rate_pct"),
+                "spread_bp": per.get("spread_bp"),
+            })
+        return rows
+    except Exception as e:
+        # A preview is a convenience; never let it cost the trader the extraction.
+        print(f"[Termsheet] schedule preview unavailable: {e}")
+        return []
+
+
 # ---------------------------------------------------------------- 7. orchestration
 def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
                       reviewers=None) -> Dict[str, Any]:
@@ -955,5 +1013,7 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
         "adjudication": adjudication,
         # Which vendor actually saw the document, and what the others said.
         "extraction": used or None,
+        # The schedule as the pricer will read it, for the review popup.
+        "schedule_preview": schedule_preview(mapped["draft"]),
         "redaction": {"counts": redaction_counts, "leaks": leaks},
     }

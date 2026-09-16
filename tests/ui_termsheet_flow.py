@@ -66,6 +66,23 @@ STUB = {
         "cross_validation": None,
         "adjudication": None,
         "redaction": {"counts": {"party": 2, "identifier": 1}, "leaks": []},
+        "schedule_preview": [
+            {"no": 1, "start_date": "2026-09-15", "end_date": "2027-09-15",
+             "pay_date": "2027-09-15", "pay_date_rolled": False,
+             "notional": 100000000, "fixing_date": "2026-09-11", "fixed_rate_pct": 3.65},
+            {"no": 2, "start_date": "2027-09-15", "end_date": "2028-09-15",
+             "pay_date": "2028-09-15", "pay_date_rolled": False,
+             "notional": 80000000, "fixing_date": "2027-09-13", "fixed_rate_pct": 3.65},
+            {"no": 3, "start_date": "2028-09-15", "end_date": "2029-09-15",
+             "pay_date": "2029-09-17", "pay_date_rolled": True,
+             "notional": 60000000, "fixing_date": "2028-09-13", "fixed_rate_pct": 3.65},
+            {"no": 4, "start_date": "2029-09-15", "end_date": "2030-09-15",
+             "pay_date": "2030-09-16", "pay_date_rolled": True,
+             "notional": 40000000, "fixing_date": "2029-09-13", "fixed_rate_pct": 3.65},
+            {"no": 5, "start_date": "2030-09-15", "end_date": "2031-09-15",
+             "pay_date": "2031-09-15", "pay_date_rolled": False,
+             "notional": 20000000, "fixing_date": "2030-09-12", "fixed_rate_pct": 3.65},
+        ],
     },
 }
 
@@ -183,6 +200,27 @@ def main():
                     fails.append(f"팝업 스케줄 원금 누락: {missing}")
                 else:
                     ok("팝업 스케줄에 상각 원금 5단계 표시")
+
+            heads = [h.inner_text().strip() for h in
+                     page.locator(".ts-sched-table thead th").all()]
+            want = ["Start date", "End date", "Pay date", "Nominal", "Fixing date"]
+            missing = [w for w in want if w.lower() not in [h.lower() for h in heads]]
+            if missing:
+                fails.append(f"팝업 스케줄 컬럼 누락: {missing} (현재 {heads})")
+            else:
+                ok(f"팝업 스케줄 컬럼: {heads}")
+
+            body = page.locator(".ts-sched-table tbody").inner_text()
+            for d in ("2029-09-17", "2030-09-16"):      # weekend ends, rolled forward
+                if d not in body:
+                    fails.append(f"영업일 조정된 지급일 {d} 미표시")
+                    break
+            else:
+                ok("지급일 영업일 조정 반영됨 (2029-09-17, 2030-09-16)")
+            if "2026-09-11" not in body:
+                fails.append("픽싱일이 표시되지 않음")
+            else:
+                ok("픽싱일 표시됨")
 
             summary = page.locator("#ts-sched-summary").inner_text()
             if "상각" not in summary:
