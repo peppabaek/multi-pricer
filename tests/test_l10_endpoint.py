@@ -173,6 +173,47 @@ def t_e11():
         raise AssertionError("stamp did not return with the original mtime")
 
 
+@case("L10-E12", "a browser on a cached older dashboard is told, in the one place it shows")
+def t_e12():
+    from server.app import UI_BUILD
+    page = {"Referer": "http://127.0.0.1:8000/", "Sec-Fetch-Mode": "cors"}
+
+    # An old page: no build header. It cannot render a popup and rejects Excel before
+    # it ever asks the server, so the status text is the only message it will display.
+    old = client.get("/api/termsheet/status", headers=page).json()["data"]
+    if old.get("ready") or not old.get("ui_stale"):
+        raise AssertionError(f"a stale dashboard was told everything is fine: {old}")
+    if "Ctrl+F5" not in old.get("reason", ""):
+        raise AssertionError(f"no instruction in the reason: {old.get('reason')}")
+
+    # TestClient sends no Referer of its own, so this one has to carry the page headers.
+    up = client.post("/api/termsheet/extract", headers=page,
+                     files={"file": ("t.pdf", _MINIMAL_PDF, "application/pdf")})
+    if up.status_code != 409:
+        raise AssertionError(f"an upload from a stale page was accepted: {up.status_code}")
+
+    # The current dashboard is unaffected.
+    cur = dict(page, **{"X-Pricer-UI": UI_BUILD})
+    now = client.get("/api/termsheet/status", headers=cur).json()["data"]
+    if now.get("ui_stale"):
+        raise AssertionError(f"a current dashboard was called stale: {now}")
+    ok = client.post("/api/termsheet/extract", headers=cur,
+                     files={"file": ("t.pdf", _MINIMAL_PDF, "application/pdf")})
+    if ok.status_code != 200:
+        raise AssertionError(f"current dashboard refused: {ok.status_code} {ok.text[:200]}")
+
+
+@case("L10-E13", "scripts and tools are not mistaken for stale browsers")
+def t_e13():
+    # No Referer and no Sec-Fetch headers: curl, a scheduled job, this test client.
+    d = client.get("/api/termsheet/status").json()["data"]
+    if d.get("ui_stale"):
+        raise AssertionError("a non-browser client was treated as a stale page")
+    r = upload(_MINIMAL_PDF)
+    if r.status_code != 200:
+        raise AssertionError(f"a script upload was refused: {r.status_code}")
+
+
 if __name__ == "__main__":
     print("\n=== L10 Termsheet endpoint ===")
     sys.exit(1 if run_all("L10-E") else 0)

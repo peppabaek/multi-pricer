@@ -1863,6 +1863,22 @@ document.addEventListener("DOMContentLoaded", () => {
     // instead of a popup that simply never opens.
     window.__PRICER_BUILD__ = "termsheet-popup";
 
+    // Stamp every call to our own API with that build. The server uses it to tell a
+    // current dashboard from a cached older one, which is otherwise indistinguishable
+    // from the outside and invisible from the inside.
+    (function stampOwnRequests() {
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = function (input, init) {
+            const url = typeof input === "string" ? input : (input && input.url) || "";
+            if (url.indexOf("/api/") === 0 || url.indexOf("api/") === 0) {
+                init = Object.assign({}, init);
+                init.headers = new Headers((init && init.headers) || {});
+                init.headers.set("X-Pricer-UI", window.__PRICER_BUILD__);
+            }
+            return nativeFetch(input, init);
+        };
+    })();
+
     // ---- Termsheet upload -------------------------------------------------
     // The document is parsed and redacted server-side and never stored. A ticket built
     // from it stays reviewState "pending" until the trader confirms, which gates F9.

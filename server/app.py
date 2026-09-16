@@ -34,7 +34,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from fastapi import FastAPI, HTTPException, Response, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -1105,15 +1105,44 @@ def reset_quotes_crs():
 MAX_TERMSHEET_BYTES = 20 * 1024 * 1024
 
 
+# The build of the dashboard this server ships. app.js sends it on its own requests,
+# so a browser running a cached older copy can be recognised from the missing header.
+UI_BUILD = "termsheet-popup"
+
+
+def _stale_ui(request: "Request") -> bool:
+    """
+    Whether this request came from a dashboard older than the one this server ships.
+
+    Only a browser can be holding a stale page, and a browser identifies itself by
+    sending a Referer or the Sec-Fetch headers; curl, the test client and any script
+    send neither and are left alone.
+    """
+    from_page = bool(request.headers.get("referer") or request.headers.get("sec-fetch-mode"))
+    return from_page and request.headers.get("x-pricer-ui") != UI_BUILD
+
+
 @app.get("/api/termsheet/status")
-def termsheet_status():
-    """Tell the dashboard whether term sheet extraction is available."""
+def termsheet_status(request: Request):
+    """
+    Tell the dashboard whether term sheet extraction is available.
+
+    A browser holding a cached pre-popup dashboard reaches this endpoint but cannot
+    reach the popup or upload anything but a PDF, and nothing on its screen says why.
+    It does render this endpoint's `reason`, so that is where it gets told to reload -
+    the one message such a page will actually show.
+    """
     from server.termsheet import extraction_status
-    return {"status": "success", "data": extraction_status()}
+
+    data = extraction_status()
+    if _stale_ui(request):
+        data = dict(data, ready=False, ui_stale=True,
+                    reason="대시보드가 오래되었습니다 — Ctrl+F5 로 새로고침하세요")
+    return {"status": "success", "data": data}
 
 
 @app.post("/api/termsheet/extract")
-async def extract_termsheet(file: UploadFile = File(...)):
+async def extract_termsheet(request: Request, file: UploadFile = File(...)):
     """
     Read a termsheet, return a draft ticket for the trader to review.
 
@@ -1121,6 +1150,11 @@ async def extract_termsheet(file: UploadFile = File(...)):
     out, and the bytes are dropped when this call returns. Nothing is written to disk.
     """
     from server.termsheet import process_termsheet
+
+    if _stale_ui(request):
+        raise HTTPException(
+            status_code=409,
+            detail="대시보드가 오래되었습니다 — Ctrl+F5 로 새로고침한 뒤 다시 올려주세요")
 
     # No extension gate: what the file actually is decides how it is read, and a
     # marketer's attachment is as likely to be an Excel sheet or a phone photo as a PDF.
