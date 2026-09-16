@@ -47,15 +47,24 @@ class _Env:
         else:
             os.environ["TERMSHEET_FALLBACK_PROVIDERS"] = self.fallbacks
 
+        self._saved_ladder = {k: os.environ.get(k) for k in
+                              ("GEMINI_FALLBACK_MODELS", "ANTHROPIC_FALLBACK_MODELS",
+                               "GROQ_FALLBACK_MODELS")}
+        for k in self._saved_ladder:
+            os.environ[k] = ""          # one model each, unless a test says otherwise
         self._is_av, self._get_ex = provmod.is_available, provmod.get_extractor
         self._load = tsmod.load_env_file
         tsmod.load_env_file = lambda *a, **k: None
         provmod.is_available = lambda n: n in self.available
 
-        def get_extractor(name, *a, **k):
+        def get_extractor(name, *a, model_name=None, **k):
             def run(text):
-                self.calls.append(name)
-                b = self.behaviours.get(name)
+                # Behaviours are keyed by provider, or by "provider:model" to make one
+                # model fail while its siblings still work.
+                key = f"{name}:{model_name}" if f"{name}:{model_name}" in self.behaviours \
+                      else name
+                self.calls.append(key if ":" in key else name)
+                b = self.behaviours.get(key)
                 if isinstance(b, Exception):
                     raise b
                 return b(text) if callable(b) else _trade()
@@ -66,6 +75,11 @@ class _Env:
         return self
 
     def __exit__(self, *exc):
+        for k, v in self._saved_ladder.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
         provmod.is_available, provmod.get_extractor = self._is_av, self._get_ex
         tsmod.load_env_file = self._load
         for k, v in self._saved_env.items():
@@ -259,6 +273,93 @@ def t_14():
             raise AssertionError(f"primary is not first: {chain}")
         if len(set(chain)) != len(chain):
             raise AssertionError(f"a provider appears twice: {chain}")
+
+
+@case("L15-15", "an exhausted model moves to the next model of the same provider")
+def t_15():
+    # The free tier meters per model: gemini-3.5-flash being out says nothing about
+    # its siblings, and switching vendors at that point would be premature.
+    with _Env("gemini", {"gemini", "anthropic"},
+              {"gemini:m1": _Rate("429 RESOURCE_EXHAUSTED")}) as env:
+        os.environ["GEMINI_MODEL"] = "m1"
+        os.environ["GEMINI_FALLBACK_MODELS"] = "m2,m3"
+        try:
+            used = {}
+            call_extractor("doc", used=used)
+        finally:
+            os.environ.pop("GEMINI_MODEL", None)
+        if used["provider"] != "gemini":
+            raise AssertionError(f"left the provider too early: {used}")
+        if used["model"] != "m2":
+            raise AssertionError(f"wrong model chosen: {used}")
+        if "anthropic" in env.calls:
+            raise AssertionError(f"went to another vendor unnecessarily: {env.calls}")
+
+
+@case("L15-16", "only once every model is out does it change provider")
+def t_16():
+    with _Env("gemini", {"gemini", "anthropic"},
+              {"gemini:m1": _Rate("429 quota"), "gemini:m2": _Rate("429 quota")}) as env:
+        os.environ["GEMINI_MODEL"] = "m1"
+        os.environ["GEMINI_FALLBACK_MODELS"] = "m2"
+        try:
+            used = {}
+            call_extractor("doc", used=used)
+        finally:
+            os.environ.pop("GEMINI_MODEL", None)
+        if used["provider"] != "anthropic":
+            raise AssertionError(f"did not move on: {used}")
+        if [a["model"] for a in used["attempts"]] != ["m1", "m2"]:
+            raise AssertionError(f"did not try every model first: {used['attempts']}")
+
+
+@case("L15-17", "the model ladder can be pinned to a single approved model")
+def t_17():
+    with _Env("gemini", {"gemini", "anthropic"},
+              {"gemini:m1": _Rate("429 quota")}) as env:
+        os.environ["GEMINI_MODEL"] = "m1"
+        os.environ["GEMINI_FALLBACK_MODELS"] = ""
+        try:
+            used = {}
+            call_extractor("doc", used=used)
+        finally:
+            os.environ.pop("GEMINI_MODEL", None)
+        if used["provider"] != "anthropic":
+            raise AssertionError(f"expected a provider switch: {used}")
+        if any(a["model"] != "m1" for a in used["attempts"] if a["provider"] == "gemini"):
+            raise AssertionError(f"used an unapproved model: {used['attempts']}")
+
+
+@case("L15-18", "a model switch counts as a fallback and is reported")
+def t_18():
+    with _Env("gemini", {"gemini"}, {"gemini:m1": _Rate("429 quota")}):
+        os.environ["GEMINI_MODEL"] = "m1"
+        os.environ["GEMINI_FALLBACK_MODELS"] = "m2"
+        try:
+            used = {}
+            call_extractor("doc", used=used)
+        finally:
+            os.environ.pop("GEMINI_MODEL", None)
+        if not used["fell_back"]:
+            raise AssertionError("a different model read the document without saying so")
+
+
+@case("L15-19", "the cooldown is per model, not per provider")
+def t_19():
+    with _Env("gemini", {"gemini"}, {"gemini:m1": _Rate("429 quota")}) as env:
+        os.environ["GEMINI_MODEL"] = "m1"
+        os.environ["GEMINI_FALLBACK_MODELS"] = "m2"
+        try:
+            call_extractor("doc", used={})
+            env.calls.clear()
+            used = {}
+            call_extractor("doc", used=used)
+        finally:
+            os.environ.pop("GEMINI_MODEL", None)
+        if "gemini:m1" in env.calls:
+            raise AssertionError(f"retried the exhausted model: {env.calls}")
+        if used["model"] != "m2":
+            raise AssertionError(f"the working model was cooled off too: {used}")
 
 
 if __name__ == "__main__":

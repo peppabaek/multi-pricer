@@ -501,6 +501,12 @@ def _classify_provider_error(exc: Exception) -> Optional[str]:
     return None
 
 
+def extraction_candidates() -> List[Tuple[str, str]]:
+    """Every (provider, model) worth trying, in order."""
+    from server.providers import model_candidates
+    return [(n, m) for n in extraction_chain() for m in model_candidates(n)]
+
+
 def extraction_chain() -> List[str]:
     """
     The order models are tried in: the configured one, then whatever else can run.
@@ -553,19 +559,23 @@ def call_extractor(redacted_text: str, model: str = None,
             f"발급: {PROVIDERS[name]['signup']}")
 
     attempts: List[Dict[str, str]] = []
+    from server.providers import model_candidates
+    # A free tier meters per model, so an exhausted model is not an exhausted vendor:
+    # walk each provider's models before moving to the next provider.
+    cands = [(n, m) for n in runnable for m in model_candidates(n)]
     # Skip anything still cooling off, but never skip every option: if that is all we
     # have, try it anyway rather than refusing to read the document.
-    order = [n for n in runnable if not _cooling_off(n)] or runnable
+    order = [c for c in cands if not _cooling_off(f"{c[0]}:{c[1]}")] or cands
 
-    for n in order:
+    for n, mdl in order:
         try:
-            trade = get_extractor(n)(redacted_text)
+            trade = get_extractor(n, model_name=mdl)(redacted_text)
         except Exception as e:
             reason = _classify_provider_error(e)
-            attempts.append({"provider": n, "label": PROVIDERS[n]["label"],
+            attempts.append({"provider": n, "label": PROVIDERS[n]["label"], "model": mdl,
                              "reason": reason or "실패", "detail": str(e)[:200]})
             if reason in ("호출 한도", "잔액 부족"):
-                _PROVIDER_COOLDOWN[n] = time.time() + _COOLDOWN_SECONDS
+                _PROVIDER_COOLDOWN[f"{n}:{mdl}"] = time.time() + _COOLDOWN_SECONDS
             if reason is None:
                 # Not the provider's fault - another model would fail the same way.
                 if demo_mode_enabled():
@@ -576,11 +586,11 @@ def call_extractor(redacted_text: str, model: str = None,
                 raise
             continue
 
-        _PROVIDER_COOLDOWN.pop(n, None)
+        _PROVIDER_COOLDOWN.pop(f"{n}:{mdl}", None)
         if used is not None:
-            used.update({"provider": n, "label": PROVIDERS[n]["label"],
-                         "model": PROVIDERS[n].get("default_model"),
-                         "fell_back": n != name, "attempts": attempts})
+            used.update({"provider": n, "label": PROVIDERS[n]["label"], "model": mdl,
+                         "fell_back": n != name or mdl != model_candidates(n)[0],
+                         "attempts": attempts})
         return trade
 
     if demo_mode_enabled():
@@ -591,7 +601,8 @@ def call_extractor(redacted_text: str, model: str = None,
 
     if used is not None:
         used.update({"provider": None, "fell_back": False, "attempts": attempts})
-    detail = " / ".join(f"{a['label']}: {a['reason']}" for a in attempts)
+    detail = " / ".join(f"{a['label']} {a.get('model', '')}: {a['reason']}"
+                        for a in attempts)
     raise ValueError(
         f"사용 가능한 모든 프로바이더가 응답하지 못했습니다 ({detail}). "
         f"잠시 후 다시 시도하거나 {_ENV_FILE} 에 다른 프로바이더 키를 추가하세요.")
@@ -871,9 +882,10 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
     blocked = sorted(set(unverified) | set(unmapped))
 
     if used.get("fell_back"):
-        tried = ", ".join(f"{a['label']}({a['reason']})" for a in used.get("attempts", []))
-        warnings.insert(0, f"{used['label']}가 문서를 분석했습니다 — "
-                           f"설정된 1차 프로바이더 대체 (시도: {tried})")
+        tried = ", ".join(f"{a.get('model') or a['label']}({a['reason']})"
+                          for a in used.get("attempts", []))
+        warnings.insert(0, f"{used['label']} {used.get('model', '')}가 문서를 분석했습니다 — "
+                           f"설정된 1차 모델 대체 (시도: {tried})")
 
     if second_configured and not (comparison and comparison.get("compared")):
         warnings.append(

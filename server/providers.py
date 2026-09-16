@@ -36,6 +36,10 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         # aliased model answered 503 while the pinned one was fine. Override with
         # GEMINI_MODEL when a newer release is worth taking.
         "default_model": "gemini-3.5-flash",
+        # The free tier meters per model, not per key, so an exhausted model does not
+        # mean an exhausted provider. Tried in order after the default, newest first.
+        "fallback_models": ["gemini-3.6-flash", "gemini-3.5-flash-lite",
+                            "gemini-3.1-flash-lite"],
         "tier_env": "GEMINI_TIER",
         "cost": {"free": "free tier", "paid": "paid"},
         "free_limits": "분당 15회 · 일 1,500회 (무료 티어)",
@@ -122,13 +126,34 @@ def resolve_key(name: str) -> Optional[str]:
     return None
 
 
-def resolve_model(name: str, override_env: Optional[str] = None) -> str:
+def resolve_model(name: str, override_env: Optional[str] = None,
+                  explicit: Optional[str] = None) -> str:
+    if explicit:
+        return explicit
     spec = PROVIDERS[name]
     if override_env:
         v = os.environ.get(override_env)
         if v:
             return v
     return os.environ.get(spec["model_env"], spec["default_model"])
+
+
+def model_candidates(name: str, override_env: Optional[str] = None) -> List[str]:
+    """
+    The models to try for this provider, best first.
+
+    <PROVIDER>_FALLBACK_MODELS pins the ladder; an empty value means "this model or
+    nothing", for a desk that has approved exactly one.
+    """
+    spec = PROVIDERS.get(name, {})
+    out = [resolve_model(name, override_env)]
+    raw = os.environ.get(f"{name.upper()}_FALLBACK_MODELS")
+    extra = ([m.strip() for m in raw.split(",") if m.strip()] if raw is not None
+             else list(spec.get("fallback_models", [])))
+    for m in extra:
+        if m not in out:
+            out.append(m)
+    return out
 
 
 def is_available(name: str) -> bool:
@@ -176,7 +201,8 @@ def describe() -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------- extractors
-def _openai_style_extractor(name: str, model_override_env: Optional[str] = None):
+def _openai_style_extractor(name: str, model_override_env: Optional[str] = None,
+                            model_name: Optional[str] = None):
     """Covers every OpenAI-compatible endpoint: GitHub Models, Groq, Ollama, OpenAI."""
     spec = PROVIDERS[name]
 
@@ -186,7 +212,7 @@ def _openai_style_extractor(name: str, model_override_env: Optional[str] = None)
 
         client = OpenAI(api_key=resolve_key(name) or "not-needed",
                         base_url=spec.get("base_url"))
-        model = resolve_model(name, model_override_env)
+        model = resolve_model(name, model_override_env, model_name)
         schema = ExtractedTrade.model_json_schema()
         resp = client.chat.completions.create(
             model=model,
@@ -203,14 +229,15 @@ def _openai_style_extractor(name: str, model_override_env: Optional[str] = None)
     return extract
 
 
-def _anthropic_extractor(model_override_env: Optional[str] = None):
+def _anthropic_extractor(model_override_env: Optional[str] = None,
+                         model_name: Optional[str] = None):
     def extract(redacted_text: str):
         import anthropic
         from server.termsheet import SYSTEM_PROMPT, ExtractedTrade
 
         client = anthropic.Anthropic(api_key=resolve_key("anthropic"))
         resp = client.messages.parse(
-            model=resolve_model("anthropic", model_override_env),
+            model=resolve_model("anthropic", model_override_env, model_name),
             max_tokens=16000,
             system=[{"type": "text", "text": SYSTEM_PROMPT,
                      "cache_control": {"type": "ephemeral"}}],
@@ -224,7 +251,8 @@ def _anthropic_extractor(model_override_env: Optional[str] = None):
     return extract
 
 
-def _gemini_extractor(model_override_env: Optional[str] = None):
+def _gemini_extractor(model_override_env: Optional[str] = None,
+                      model_name: Optional[str] = None):
     def extract(redacted_text: str):
         from google import genai
         from google.genai import types
@@ -232,7 +260,7 @@ def _gemini_extractor(model_override_env: Optional[str] = None):
 
         client = genai.Client(api_key=resolve_key("gemini"))
         resp = client.models.generate_content(
-            model=resolve_model("gemini", model_override_env),
+            model=resolve_model("gemini", model_override_env, model_name),
             contents=f"Extract the trade terms from this termsheet.\n\n{redacted_text}",
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
@@ -245,7 +273,8 @@ def _gemini_extractor(model_override_env: Optional[str] = None):
     return extract
 
 
-def get_extractor(name: str, model_override_env: Optional[str] = None) -> Callable[[str], Any]:
+def get_extractor(name: str, model_override_env: Optional[str] = None,
+                  model_name: Optional[str] = None) -> Callable[[str], Any]:
     name = (name or "").strip().lower()
     if name not in PROVIDERS:
         raise ValueError(f"알 수 없는 프로바이더: {name!r} "
@@ -254,10 +283,10 @@ def get_extractor(name: str, model_override_env: Optional[str] = None) -> Callab
         envs = " 또는 ".join(PROVIDERS[name]["key_env"]) or "(키 불필요)"
         raise ValueError(f"{PROVIDERS[name]['label']} 키가 없습니다 — {envs} 를 설정하세요")
     if name == "anthropic":
-        return _anthropic_extractor(model_override_env)
+        return _anthropic_extractor(model_override_env, model_name)
     if name == "gemini":
-        return _gemini_extractor(model_override_env)
-    return _openai_style_extractor(name, model_override_env)
+        return _gemini_extractor(model_override_env, model_name)
+    return _openai_style_extractor(name, model_override_env, model_name)
 
 
 # ---------------------------------------------------------------- reviewers
