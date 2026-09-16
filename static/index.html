@@ -1220,5 +1220,22 @@
     <div class="toast-container" id="toast-container"></div>
 
     <script src="app.js?v=4.2"></script>
+    <!-- This page is served no-store, so it is always current. The script may not be:
+         a browser can still be holding a cached copy from before the asset URLs were
+         stamped. Say so plainly rather than leaving features silently missing. -->
+    <script>
+    // On load, not at parse time: app.js does its work inside DOMContentLoaded, so
+    // checking any earlier would flag a perfectly current script.
+    window.addEventListener("load", function () {
+        if (window.__PRICER_BUILD__) return;
+        var bar = document.createElement("div");
+        bar.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:99999;" +
+            "background:#b45309;color:#fff;font:700 13px system-ui,sans-serif;" +
+            "padding:10px 16px;text-align:center;";
+        bar.textContent = "이 페이지의 스크립트가 최신이 아닙니다 — " +
+            "Ctrl+F5 로 새로고침하세요 (브라우저에 예전 app.js 가 남아 있습니다)";
+        document.body.appendChild(bar);
+    });
+    </script>
 </body>
 </html>

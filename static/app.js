@@ -1857,6 +1857,12 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // Tells the page - which is always served fresh - that the script it got is the
+    // one that goes with it. A browser holding a cached older app.js never sets this,
+    // and the check in index.html turns that silent mismatch into a visible message
+    // instead of a popup that simply never opens.
+    window.__PRICER_BUILD__ = "termsheet-popup";
+
     // ---- Termsheet upload -------------------------------------------------
     // The document is parsed and redacted server-side and never stored. A ticket built
     // from it stays reviewState "pending" until the trader confirms, which gates F9.
@@ -2179,7 +2185,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function openTermsheetModal() {
-        if (!ts.backdrop) return;
+        if (!ts.backdrop) {
+            showToast("검토 창을 열 수 없습니다 — 페이지를 새로고침(Ctrl+F5)하세요", "warning");
+            return;
+        }
         ts.backdrop.style.display = "flex";
         tsShow("idle");
         if (ts.confirm && !ts.confirm.disabled) ts.confirm.focus();

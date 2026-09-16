@@ -940,10 +940,14 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
     blocked = sorted(set(unverified) | set(unmapped))
 
     if used.get("fell_back"):
+        # With no attempts recorded the primary was never called - it was still inside
+        # the cooldown from an earlier quota error. "시도: " with nothing after it read
+        # as though nothing had happened at all.
         tried = ", ".join(f"{a.get('model') or a['label']}({a['reason']})"
                           for a in used.get("attempts", []))
+        why = f"시도: {tried}" if tried else "1차 모델이 최근 한도 초과로 제외됨"
         warnings.insert(0, f"{used['label']} {used.get('model', '')}가 문서를 분석했습니다 — "
-                           f"설정된 1차 모델 대체 (시도: {tried})")
+                           f"설정된 1차 모델 대체 ({why})")
 
     if second_configured and not (comparison and comparison.get("compared")):
         warnings.append(
