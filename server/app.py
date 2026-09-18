@@ -1114,9 +1114,9 @@ def _stale_ui(request: "Request") -> bool:
     """
     Whether this request came from a dashboard older than the one this server ships.
 
-    Only a browser can be holding a stale page, and a browser identifies itself by
-    sending a Referer or the Sec-Fetch headers; curl, the test client and any script
-    send neither and are left alone.
+    Advisory only - nothing is refused on the strength of it. Only a browser can be
+    holding a stale page, and a browser identifies itself by sending a Referer or the
+    Sec-Fetch headers; curl, the test client and any script send neither.
     """
     from_page = bool(request.headers.get("referer") or request.headers.get("sec-fetch-mode"))
     return from_page and request.headers.get("x-pricer-ui") != UI_BUILD
@@ -1136,8 +1136,11 @@ def termsheet_status(request: Request):
 
     data = extraction_status()
     if _stale_ui(request):
-        data = dict(data, ready=False, ui_stale=True,
-                    reason="대시보드가 오래되었습니다 — Ctrl+F5 로 새로고침하세요")
+        # Advisory only. `ready` still reports whether extraction can run, because a
+        # page that is behind can still upload perfectly well - and saying otherwise
+        # sends someone hunting for an API problem that is not there.
+        data = dict(data, ui_stale=True,
+                    ui_message="대시보드가 최신이 아닐 수 있습니다 — Ctrl+F5 로 새로고침하세요")
     return {"status": "success", "data": data}
 
 
@@ -1166,11 +1169,6 @@ async def extract_termsheet(request: Request, file: UploadFile = File(...)):
     out, and the bytes are dropped when this call returns. Nothing is written to disk.
     """
     from server.termsheet import process_termsheet, record_failure
-
-    if _stale_ui(request):
-        raise HTTPException(
-            status_code=409,
-            detail="대시보드가 오래되었습니다 — Ctrl+F5 로 새로고침한 뒤 다시 올려주세요")
 
     # No extension gate: what the file actually is decides how it is read, and a
     # marketer's attachment is as likely to be an Excel sheet or a phone photo as a PDF.

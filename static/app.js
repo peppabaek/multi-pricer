@@ -2314,6 +2314,9 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!d.ready) {
                 ts.idle.classList.add("ts-unavailable");
                 if (note) note.textContent = `분석 비활성 — ${d.reason || "API 키 미설정"}`;
+            } else if (d.ui_stale && note) {
+                // Behind, but working: say so without making it look switched off.
+                note.textContent = d.ui_message;
             } else if (note) {
                 note.textContent =
                     "PDF를 끌어다 놓거나 클릭해 선택 · 거래상대 정보는 제거 후 분석하며 원본은 저장하지 않습니다";
