@@ -1190,6 +1190,29 @@ def recent_failures() -> List[Dict[str, Any]]:
     return list(reversed(_RECENT_FAILURES))
 
 
+PASTE_HEADER = "Start date\tEnd date\tPay date\tNominal\tFixing date\tRate (%)"
+
+
+def render_paste(rows: List[Dict[str, Any]]) -> str:
+    """
+    The schedule as the paste box reads it: named columns, in its own order.
+
+    The box is labelled Start / End / Pay / Nominal / Fixing, and the extractor used
+    to write three columns into it - so a notional sat under "Pay date", which is
+    both unreadable and one positional guess away from being priced as a date. The
+    header row removes the guess for the parser and for whoever is looking at it.
+    """
+    out = [PASTE_HEADER]
+    for r in rows:
+        rate = r.get("fixed_rate_pct")
+        out.append("\t".join([
+            r["start_date"], r["end_date"], r.get("pay_date") or r["end_date"],
+            f"{float(r['notional']):.0f}", r.get("fixing_date") or "",
+            "" if rate is None else f"{float(rate):g}",
+        ]))
+    return "\n".join(out)
+
+
 # ---------------------------------------------------------------- 7. orchestration
 def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
                       reviewers=None, filename: str = "") -> Dict[str, Any]:
@@ -1312,6 +1335,12 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
         warnings.append(f"마스킹 후에도 민감정보 패턴이 남아 있습니다: {', '.join(leaks)}")
 
     mapped = to_ticket_draft(trade)
+    # Resolve pay and fixing dates once, and let the paste box, the popup table and
+    # pricing all read the same rows - rather than the box holding one shape and the
+    # review panel showing another.
+    preview = schedule_preview(mapped["draft"])
+    if preview:
+        mapped["draft"]["rawPasteText"] = render_paste(preview)
     blocked = sorted(set(unverified) | set(unmapped))
 
     if by_vision:
@@ -1398,7 +1427,7 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
         # Which vendor actually saw the document, and what the others said.
         "extraction": used or None,
         # The schedule as the pricer will read it, for the review popup.
-        "schedule_preview": schedule_preview(mapped["draft"]),
+        "schedule_preview": preview,
         "source": {"kind": kind, "by_vision": by_vision, "redacted": not by_vision},
         "redaction": {"counts": redaction_counts, "leaks": leaks},
     }

@@ -183,12 +183,14 @@ def t_5():
 def t_6():
     r = run("TS-B")
     paste = r["ticket_draft"].get("rawPasteText", "")
-    lines = [l for l in paste.splitlines() if l.strip()]
-    if len(lines) != 5:
-        raise AssertionError(f"expected 5 periods, got {len(lines)}: {paste!r}")
+    # Count what the parser makes of it, not the lines: the block carries a header row,
+    # and counting lines would both miscount and miss a header read as a period.
     parsed = client.post("/api/rollercoaster/parse-paste", json={
         "raw_paste_text": paste, "currency": "USD", "effective_date": "2026-09-15",
     }).json()
+    if len(parsed["data"]) != 5:
+        raise AssertionError(
+            f"expected 5 periods, got {len(parsed['data'])}: {paste!r}")
     got = [p["notional"] for p in parsed["data"]]
     if got != [1e8, 8e7, 6e7, 4e7, 2e7]:
         raise AssertionError(f"amortisation lost in translation: {got}")

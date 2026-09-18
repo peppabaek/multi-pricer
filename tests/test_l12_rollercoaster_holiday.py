@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 import server.termsheet as tsmod
 from server.app import app
 from server.termsheet import process_termsheet, ExtractedTrade, SchedulePeriod, Provenance
+from common_pricer.rollercoaster_engine import parse_rollercoaster_paste
 from sample_termsheets import build_pdf
 from test_l2_pricing import freeze_market
 
@@ -165,7 +166,10 @@ def t_1():
     for name in CASES:
         data, rows = run_doc(name)
         paste = data["ticket_draft"].get("rawPasteText", "")
-        got = [l for l in paste.splitlines() if l.strip()]
+        # Parsed periods, not lines: the block has a header row, and a header counted
+        # as a period is exactly the mistake worth catching here.
+        got = parse_rollercoaster_paste(paste, datetime.date(2026, 9, 15),
+                                        default_notional=1e8)
         if len(got) != len(rows):
             raise AssertionError(f"{name}: expected {len(rows)} periods, got {len(got)}")
 

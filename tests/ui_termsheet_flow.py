@@ -127,7 +127,7 @@ def main():
         f.write(pdf("TS-B"))
 
     srv = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "server.app:app", "--host", "127.0.0.1",
+        [sys.executable, "-m", "uvicorn", "tests.stub_server:app", "--host", "127.0.0.1",
          "--port", str(PORT), "--log-level", "warning"],
         cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     fails = []
@@ -150,12 +150,9 @@ def main():
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
 
-            if not live:
-                page.route("**/api/termsheet/extract",
-                           lambda route: route.fulfill(
-                               status=200, content_type="application/json",
-                               body=json.dumps(STUB, ensure_ascii=False)))
-
+            # --live uses the real model; otherwise the server stubs only the model
+            # call, so the endpoint, the paste text it writes and the pricing that
+            # follows are all the shipped code.
             page.goto(f"http://127.0.0.1:{PORT}/", wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(4000)
 
@@ -266,16 +263,31 @@ def main():
 
             leg1 = page.locator("#rc-paste-input-leg1").input_value()
             lines = [l for l in leg1.splitlines() if l.strip()]
-            if len(lines) != 5:
-                fails.append(f"Leg1 스케줄 {len(lines)}개 기간 (5개여야 함)")
+            head = lines[0].split("\t") if lines else []
+            body = [l.split("\t") for l in lines[1:]]
+            if "Start date" not in lines[0] or "Nominal" not in lines[0]:
+                fails.append(f"붙여넣기 상자에 컬럼 헤더가 없음: {lines[0]!r}")
+            elif len(body) != 5:
+                fails.append(f"Leg1 스케줄 {len(body)}개 기간 (5개여야 함)")
             else:
-                ok(f"Leg1 스케줄 {len(lines)}개 기간 반영됨")
-                flat = leg1.replace(",", "")
-                missing = [n for n in NOTIONALS if n not in flat]
-                if missing:
-                    fails.append(f"상각 원금 누락: {missing}")
+                ok(f"Leg1 스케줄 헤더 + {len(body)}개 기간 반영됨")
+
+                # The box is labelled Start / End / Pay / Nominal / Fixing. A notional
+                # sitting under "Pay date" is how it used to look, and it is one
+                # positional guess away from being priced as a date.
+                ni = head.index("Nominal")
+                got = [r[ni].replace(",", "") for r in body if len(r) > ni]
+                if got != list(NOTIONALS):
+                    fails.append(f"Nominal 열의 값이 원금이 아님: {got}")
                 else:
-                    ok("상각 원금 5단계 모두 반영됨")
+                    ok("Nominal 열에 상각 원금 5단계가 정확히 위치")
+
+                pi = head.index("Pay date")
+                pays = [r[pi] for r in body if len(r) > pi]
+                if any(not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v or "") for v in pays):
+                    fails.append(f"Pay date 열이 날짜가 아님: {pays}")
+                else:
+                    ok(f"Pay date 열이 모두 날짜: {pays[2]} (영업일 조정 포함)")
 
             badge = page.locator("#schedule-mode-badge")
             btxt = badge.inner_text() if badge.count() else ""
@@ -291,12 +303,19 @@ def main():
                 fails.append(f"하단 스케줄 {body_rows.count()}행 (5행이어야 함)")
             else:
                 ok("하단 Dual-Leg 스케줄에 5개 기간 적용됨")
-                txt = page.locator("#dual-table-body").inner_text().replace(",", "")
-                missing = [n for n in NOTIONALS if n not in txt]
-                if missing:
-                    fails.append(f"하단 스케줄 원금 누락: {missing}")
+                # Leg 1: start, end, pay, nominal, ... - read the column, because a
+                # flat 100,000,000 down the whole table is exactly what a schedule
+                # that never reached the pricer looks like.
+                priced = []
+                for i in range(body_rows.count()):
+                    cells = body_rows.nth(i).locator("td")
+                    if cells.count() > 3:
+                        priced.append(cells.nth(3).inner_text().strip()
+                                      .replace(",", "").split(".")[0])
+                if priced != list(NOTIONALS):
+                    fails.append(f"프라이싱된 NOMINAL 열이 상각과 다름: {priced}")
                 else:
-                    ok("하단 스케줄에 상각 원금 5단계 반영됨")
+                    ok(f"프라이싱된 NOMINAL 열 상각 반영: {priced[0]} → {priced[-1]}")
 
             alias = page.locator("#ticket-alias-input").input_value()
             if MOJIBAKE.search(alias) or "쨌" in alias:
