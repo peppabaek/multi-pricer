@@ -16,12 +16,12 @@ from server.termsheet import (
 )
 from sample_formats import (
     BUILDERS, xlsx_bytes, docx_bytes, csv_bytes, html_bytes, png_bytes,
-    scanned_pdf_bytes, as_text,
+    scanned_pdf_bytes, as_text, hwpx_bytes,
 )
 from test_l10_termsheet import _MINIMAL_PDF, _fake_trade
 
 NAMES = {"xlsx": "ts.xlsx", "docx": "ts.docx", "csv": "ts.csv", "html": "ts.html",
-         "txt": "ts.txt", "png": "ts.png", "scanpdf": "ts.pdf"}
+         "txt": "ts.txt", "png": "ts.png", "scanpdf": "ts.pdf", "hwpx": "ts.hwpx"}
 NOTIONALS = ("100000000", "80000000", "60000000", "40000000", "20000000")
 
 
@@ -45,7 +45,7 @@ def t_1():
 
 @case("L16-2", "every text-bearing format yields the terms")
 def t_2():
-    for key in ("xlsx", "docx", "csv", "html", "txt"):
+    for key in ("xlsx", "docx", "csv", "html", "txt", "hwpx"):
         txt = extract_text(BUILDERS[key](), NAMES[key])
         for term in ("3.6500", "2026-09-15", "Act/360"):
             if term not in txt.replace("15-Sep-2026", "2026-09-15"):
@@ -54,7 +54,7 @@ def t_2():
 
 @case("L16-3", "every text-bearing format yields the amortising schedule")
 def t_3():
-    for key in ("xlsx", "docx", "csv", "html", "txt"):
+    for key in ("xlsx", "docx", "csv", "html", "txt", "hwpx"):
         flat = extract_text(BUILDERS[key](), NAMES[key]).replace(",", "")
         missing = [n for n in NOTIONALS if n not in flat]
         if missing:
@@ -162,7 +162,7 @@ def t_11():
     tsmod.call_extractor = _anything
     try:
         client = TestClient(app)
-        for key in ("xlsx", "docx", "csv", "html", "txt"):
+        for key in ("xlsx", "docx", "csv", "html", "txt", "hwpx"):
             r = client.post("/api/termsheet/extract",
                             files={"file": (NAMES[key], BUILDERS[key](),
                                             "application/octet-stream")})
@@ -193,6 +193,67 @@ def t_12():
         raise AssertionError(f"expected a 4xx, got {r.status_code}: {r.text[:200]}")
     if "형식" not in r.json().get("detail", ""):
         raise AssertionError(f"no guidance in the error: {r.json()}")
+
+
+@case("L16-13", "a Korean HWPX term sheet is read, labels and schedule intact")
+def t_13():
+    txt = extract_text(hwpx_bytes(), "ts.hwpx")
+    for label in ("명목금액", "고정금리", "개시일", "만기일"):
+        if label not in txt:
+            raise AssertionError(f"Korean label lost: {label!r}")
+    flat = txt.replace(",", "")
+    missing = [n for n in NOTIONALS if n not in flat]
+    if missing:
+        raise AssertionError(f"HWPX lost notionals: {missing}")
+
+
+@case("L16-14", "binary .hwp says how to get a readable file, not that it is unreadable")
+def t_14():
+    ole = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 600
+    try:
+        extract_text(ole, "거래확인서.hwp")
+    except ValueError as e:
+        msg = str(e)
+        if "HWPX" not in msg and "PDF" not in msg:
+            raise AssertionError(f"no way forward offered: {msg}")
+    else:
+        raise AssertionError("a binary .hwp was accepted silently")
+
+
+@case("L16-15", "a failed upload is recorded where it can be read back")
+def t_15():
+    from fastapi.testclient import TestClient
+    from server.app import app
+    from server.termsheet import recent_failures
+    client = TestClient(app)
+
+    before = len(recent_failures())
+    r = client.post("/api/termsheet/extract",
+                    files={"file": ("계약서.hwp",
+                                    b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 600,
+                                    "application/octet-stream")})
+    if r.status_code // 100 != 4:
+        raise AssertionError(f"expected a 4xx, got {r.status_code}")
+
+    diag = client.get("/api/termsheet/diagnostics").json()["data"]
+    if len(diag["failures"]) <= before:
+        raise AssertionError("the failure was not recorded")
+    top = diag["failures"][0]
+    if top["kind"] != "hwp" or "계약서" not in top["filename"]:
+        raise AssertionError(f"recorded the wrong thing: {top}")
+    if not top.get("error"):
+        raise AssertionError("recorded without a reason")
+
+
+@case("L16-16", "the failure record carries no document content")
+def t_16():
+    from server.termsheet import recent_failures, record_failure
+    secret = "Counterparty: Acme Capital Markets Ltd 2,500,000,000".encode("utf-8")
+    record_failure("deal.txt", secret, "read", "boom")
+    blob = str(recent_failures()[0])
+    for leak in ("Acme", "Counterparty", "2,500,000,000"):
+        if leak in blob:
+            raise AssertionError(f"document content kept in the failure record: {leak!r}")
 
 
 if __name__ == "__main__":

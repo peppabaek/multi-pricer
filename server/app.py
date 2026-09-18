@@ -1141,6 +1141,22 @@ def termsheet_status(request: Request):
     return {"status": "success", "data": data}
 
 
+@app.get("/api/termsheet/diagnostics")
+def termsheet_diagnostics():
+    """
+    What the last few failed uploads were, so a failure can be diagnosed from the
+    dashboard rather than from whoever happens to be watching the server console.
+
+    Metadata only - file name, size, detected type, and the error.
+    """
+    from server.termsheet import recent_failures, extraction_status
+    st = extraction_status()
+    return {"status": "success", "data": {
+        "provider": st.get("provider_label"), "model": st.get("model"),
+        "ready": st.get("ready"), "failures": recent_failures(),
+    }}
+
+
 @app.post("/api/termsheet/extract")
 async def extract_termsheet(request: Request, file: UploadFile = File(...)):
     """
@@ -1149,7 +1165,7 @@ async def extract_termsheet(request: Request, file: UploadFile = File(...)):
     The document is held in memory only: identity is stripped before anything is sent
     out, and the bytes are dropped when this call returns. Nothing is written to disk.
     """
-    from server.termsheet import process_termsheet
+    from server.termsheet import process_termsheet, record_failure
 
     if _stale_ui(request):
         raise HTTPException(
@@ -1172,9 +1188,14 @@ async def extract_termsheet(request: Request, file: UploadFile = File(...)):
         except HTTPException:
             raise
         except ValueError as e:
+            record_failure(file.filename or "", raw, "read", e)
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"터미시트 추출 실패: {e}")
+            record_failure(file.filename or "", raw, "extract", e)
+            # The console is the only place this used to be visible, and nobody is
+            # watching it; keep the type so a traceback is not the only clue.
+            raise HTTPException(status_code=502,
+                                detail=f"터미시트 추출 실패: {type(e).__name__}: {e}")
         return {"status": "success", "data": result}
     finally:
         del raw

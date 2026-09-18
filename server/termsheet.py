@@ -129,9 +129,16 @@ def sniff_kind(raw: bytes, filename: str = "") -> str:
             return "docx"
         if any(n.startswith("ppt/") for n in names):
             return "pptx"
+        if any(n.startswith("Contents/") or n.endswith(".hwpx") for n in names) \
+                or ext == "hwpx":
+            return "hwpx"
         return "zip"
     if raw[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
-        return "xls" if ext in ("xls", "xlt") else "ole"      # legacy Office
+        if ext in ("xls", "xlt"):
+            return "xls"
+        if ext == "hwp" or b"HWP Document File" in raw[:2048]:
+            return "hwp"
+        return "ole"                                          # legacy Office
     if raw[:8] == b"\x89PNG\r\n\x1a\n" or raw[:3] == b"\xff\xd8\xff" \
             or raw[:6] in (b"GIF87a", b"GIF89a") or raw[:2] == b"BM" \
             or raw[:4] in (b"II*\x00", b"MM\x00*") \
@@ -196,6 +203,34 @@ def _docx_text(raw: bytes) -> str:
                 if any(cells):
                     lines.append("\t".join(cells))
     return "\n".join(lines)
+
+
+def _hwpx_text(raw: bytes) -> str:
+    """
+    HWPX is a zip of XML, the same shape as docx, so its text comes out the same way.
+
+    Korean desks draft in Hangul Word Processor, and the .hwpx save is the one that
+    can be read without the vendor's binary format.
+    """
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    out = []
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        sections = sorted(n for n in z.namelist()
+                          if n.startswith("Contents/section") and n.endswith(".xml"))
+        for name in sections or [n for n in z.namelist() if n.endswith(".xml")]:
+            try:
+                root = ET.fromstring(z.read(name))
+            except Exception:
+                continue
+            for el in root.iter():
+                tag = el.tag.rsplit("}", 1)[-1]
+                if tag in ("t", "char") and (el.text or "").strip():
+                    out.append(el.text)
+                elif tag in ("p", "tr") and out and out[-1] != "\n":
+                    out.append("\n")
+    return re.sub(r"\n{3,}", "\n\n", "".join(out))
 
 
 def _html_text(raw: bytes) -> str:
@@ -292,6 +327,12 @@ def extract_text(raw: bytes, filename: str = "") -> str:
             return _html_text(raw)
         if kind == "image":
             return ""          # nothing to read: handled by the vision path
+        if kind == "hwpx":
+            return _hwpx_text(raw)
+        if kind == "hwp":
+            raise ValueError(
+                "한글(.hwp) 바이너리 형식은 읽을 수 없습니다 - 한글에서 "
+                "'다른 이름으로 저장 → HWPX' 또는 'PDF로 저장' 후 올려주세요")
         if kind == "xls":
             raise ValueError("구형 .xls 형식입니다 - Excel에서 .xlsx로 저장한 뒤 올려주세요")
         if kind == "pptx":
@@ -1118,6 +1159,35 @@ def _mime_for(raw: bytes, filename: str = "") -> str:
         return "image/webp"
     ext = (filename or "").rsplit(".", 1)[-1].lower()
     return IMAGE_TYPES.get(ext, "image/jpeg")
+
+
+# The last few uploads that did not work. Metadata only: no document text, no file
+# bytes, nothing that could carry a counterparty name. Enough to tell a wrong format
+# from a model outage without asking anyone to read a server console.
+_RECENT_FAILURES: List[Dict[str, Any]] = []
+_MAX_FAILURES = 20
+
+
+def record_failure(filename: str, raw: bytes, stage: str, error: str) -> None:
+    import datetime as _dt
+    try:
+        kind = sniff_kind(raw, filename)
+    except Exception:
+        kind = "?"
+    _RECENT_FAILURES.append({
+        "at": _dt.datetime.now().isoformat(timespec="seconds"),
+        "filename": os.path.basename(filename or ""),
+        "bytes": len(raw or b""),
+        "kind": kind,
+        "head": (raw or b"")[:8].hex(),
+        "stage": stage,
+        "error": str(error)[:400],
+    })
+    del _RECENT_FAILURES[:-_MAX_FAILURES]
+
+
+def recent_failures() -> List[Dict[str, Any]]:
+    return list(reversed(_RECENT_FAILURES))
 
 
 # ---------------------------------------------------------------- 7. orchestration

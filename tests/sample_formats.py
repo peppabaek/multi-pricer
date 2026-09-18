@@ -122,6 +122,41 @@ def html_bytes() -> bytes:
             f"{rows}</table></body></html>").encode("utf-8")
 
 
+def hwpx_bytes() -> bytes:
+    """
+    A Hangul Word Processor document, the .hwpx (zip of XML) save.
+
+    Korean desks draft term sheets in HWP, so this is what actually lands in the
+    upload box - and the labels come in Korean, which is the point of the fixture.
+    """
+    NS = "http://www.hancom.co.kr/hwpml/2011/paragraph"
+    KO = [("거래종류", "이자율스왑"), ("통화", "USD"),
+          ("명목금액", "USD 100,000,000"),
+          ("개시일", "2026-09-15"), ("만기일", "2031-09-15"),
+          ("고정금리", "3.6500%"), ("이자계산", "Act/360"),
+          ("지급주기", "연 1회"), ("변동지표", "USD SOFR (Compounded)"),
+          ("영업일규칙", "Modified Following"), ("영업지역", "New York"),
+          ("고객 지급", "고정금리")]
+
+    def para(text):
+        text = str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return f"<hp:p><hp:run><hp:t>{text}</hp:t></hp:run></hp:p>"
+
+    lines = [para("거래확인서 - 상각형 이자율스왑")]
+    lines += [para(f"{k}: {v}") for k, v in KO]
+    lines.append(para("상각 스케줄"))
+    lines.append(para("시작일\t만기일\t명목금액"))
+    lines += [para(f"{a}\t{b}\t{n}") for a, b, n in SCHEDULE]
+
+    xml = (f"<?xml version='1.0' encoding='UTF-8'?>"
+           f"<hp:sec xmlns:hp='{NS}'>{''.join(lines)}</hp:sec>")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("mimetype", "application/hwp+zip")
+        z.writestr("Contents/section0.xml", xml)
+    return buf.getvalue()
+
+
 def png_bytes(width=1400, height=900) -> bytes:
     """The term sheet rendered as a picture - the scan / phone-photo case."""
     from PIL import Image, ImageDraw
@@ -156,6 +191,7 @@ def scanned_pdf_bytes() -> bytes:
 
 
 BUILDERS = {
+    "hwpx": hwpx_bytes,
     "xlsx": xlsx_bytes, "docx": docx_bytes, "csv": csv_bytes,
     "html": html_bytes, "txt": lambda: as_text().encode("utf-8"),
     "png": png_bytes, "scanpdf": scanned_pdf_bytes,
