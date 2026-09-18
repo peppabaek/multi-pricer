@@ -1,0 +1,62 @@
+# Render Blueprint. Point Render at this repo and it reads this file.
+#
+# What runs here and what does not:
+#   - Pricing, schedules, Greeks and term sheet extraction all work.
+#   - Live LSEG market data does NOT. The eikon library talks to the LSEG Workspace
+#     desktop application on the same machine; there is no desktop here, so the
+#     dashboard serves its baseline quotes and reports is_live_connected: false.
+#     Traders must not read a hosted deployment as live prices.
+services:
+  - type: web
+    name: multipricer
+    runtime: python
+    plan: starter            # free spins down when idle; a cold start takes ~1 min
+    region: singapore        # nearest to Seoul
+    buildCommand: pip install -r requirements-deploy.txt
+    startCommand: uvicorn server.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeploy: false        # deploy on purpose, not on every push to main
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+
+      # Required. Without both, the dashboard answers 503 rather than serving a
+      # term sheet uploader to anyone who finds the URL.
+      - key: PRICER_AUTH_USER
+        sync: false
+      - key: PRICER_AUTH_PASS
+        sync: false
+
+      # Term sheet extraction. Set the key for whichever provider you use.
+      - key: TERMSHEET_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_TIER
+        value: free          # set to "paid" only once billing is actually attached
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # Second opinion. Leave the key unset to run single-model; the review popup
+      # says so rather than implying two models agreed.
+      - key: TERMSHEET_SECOND_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false
+
+      # Images and scans have no text to redact, so the file itself goes to the
+      # model. Set to 0 where that is not permitted.
+      - key: TERMSHEET_ALLOW_IMAGE
+        value: "1"
+
+      # Writable storage for the holiday calendars, on the disk mounted below.
+      - key: PRICER_DATA_DIR
+        value: /var/data
+
+    # Holidays added through the dashboard are written to holidays_data.json. Without
+    # a disk, Render's filesystem resets on every deploy and those edits are lost.
+    disk:
+      name: pricer-data
+      mountPath: /var/data
+      sizeGB: 1

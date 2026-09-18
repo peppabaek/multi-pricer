@@ -19,17 +19,35 @@ _HOLIDAYS_MAP: Dict[str, Set[str]] = {}
 _LAST_LOADED_TIME: Optional[str] = None
 
 def _get_holidays_json_path() -> str:
-    # Check primary project path and fallback relative path
-    candidate_paths = [
-        os.path.join(os.path.dirname(__file__), "..", "holidays_data.json"),
-        os.path.abspath("holidays_data.json"),
-        "C:\\test1\\holidays_data.json",
-        "C:\\project\\test1\\holidays_data.json"
-    ]
-    for p in candidate_paths:
-        if os.path.exists(p):
-            return p
-    return candidate_paths[0]
+    """
+    Where the holiday calendars live.
+
+    PRICER_DATA_DIR points this at writable storage - a mounted disk on a host, whose
+    filesystem is otherwise rebuilt on every deploy, taking any holiday the desk added
+    with it. The repo copy seeds it the first time so a fresh deployment starts with
+    the calendars rather than with nothing.
+    """
+    repo_copy = os.path.join(os.path.dirname(__file__), "..", "holidays_data.json")
+
+    data_dir = os.environ.get("PRICER_DATA_DIR")
+    if data_dir:
+        target = os.path.join(data_dir, "holidays_data.json")
+        if not os.path.exists(target):
+            try:
+                os.makedirs(data_dir, exist_ok=True)
+                if os.path.exists(repo_copy):
+                    import shutil
+                    shutil.copyfile(repo_copy, target)
+            except OSError as e:
+                print(f"[CalendarManager] PRICER_DATA_DIR unusable ({e}); "
+                      f"falling back to the bundled calendars")
+                return repo_copy
+        return target
+
+    for candidate in (repo_copy, os.path.abspath("holidays_data.json")):
+        if os.path.exists(candidate):
+            return candidate
+    return repo_copy
 
 def _init_holidays(force: bool = False):
     global _HOLIDAYS_MAP, _LAST_LOADED_TIME

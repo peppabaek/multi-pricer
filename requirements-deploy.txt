@@ -1,0 +1,27 @@
+# Dependencies for a hosted deployment (Render and the like).
+#
+# This is requirements.txt without `eikon`. The eikon library only reaches market data
+# through the LSEG Workspace desktop application running on the same machine, so on a
+# host it would install, import, and never connect - weight and a false promise. Every
+# call into it is behind a lazy import, so leaving it out costs nothing but the live
+# feed, which is not available there anyway.
+
+# Server
+fastapi
+uvicorn[standard]
+pydantic>=2
+
+# Curve construction
+scipy
+numpy
+QuantLib
+
+# Term sheet extraction
+anthropic
+google-genai
+pypdf
+
+# Document formats: Excel, images and scans
+openpyxl
+pandas
+pillow

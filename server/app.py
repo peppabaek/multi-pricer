@@ -1514,6 +1514,21 @@ def add_custom_holiday(req: HolidayAddRequest):
 async def favicon():
     return Response(status_code=204)
 
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    """What a host polls to decide the service is up. No credentials, no data."""
+    return {"status": "ok"}
+
+
+@app.middleware("http")
+async def _access_gate(request: Request, call_next):
+    from server.access import gate
+    blocked = gate(request.url.path, request.headers.get("authorization"))
+    if blocked is not None:
+        return blocked
+    return await call_next(request)
+
+
 # ==============================================================================
 # STATIC DASHBOARD MOUNT
 # ==============================================================================
@@ -1556,5 +1571,10 @@ app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server.app:app", host="127.0.0.1", port=8000, reload=True)
+    # A host supplies PORT and needs every interface; on the desk, stay on localhost.
+    port = int(os.environ.get("PORT", "8000"))
+    hosted = bool(os.environ.get("PORT"))
+    uvicorn.run("server.app:app",
+                host="0.0.0.0" if hosted else "127.0.0.1",
+                port=port, reload=not hosted)
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
