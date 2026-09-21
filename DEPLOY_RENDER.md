@@ -124,3 +124,24 @@ healthz(무인증)   200
 
 `tests/test_l18_deploy.py`가 이 동작들을 고정합니다 — 인증 미설정 시 차단,
 헬스체크 개방, 실시간 연결을 거짓으로 표시하지 않음, 디스크 사용 불가 시 대체.
+
+---
+
+## 커맨드라인에서 배포하기 (선택)
+
+`tools/render_deploy.py`로 대시보드 없이 배포를 걸 수 있습니다. 키는 `.env`의
+`RENDER_API_KEY`에서 읽고 화면에 출력하지 않습니다. `.env`는 git에서 제외됩니다.
+
+```
+python tools/render_deploy.py                    # 서비스 목록
+python tools/render_deploy.py --env              # 설정된 변수 '이름'만 확인
+python tools/render_deploy.py --deploy --watch   # 배포 후 완료까지 대기
+python tools/render_deploy.py --check <주소>      # 배포된 주소 동작 확인
+```
+
+`--check`는 키가 없어도 동작합니다. 배포 결과만 확인할 때 쓰세요.
+
+**Render API 키는 계정 전체 권한입니다.** 서비스 생성·삭제와 환경변수 열람이
+가능하므로, 이 프로젝트의 Gemini 키와 대시보드 비밀번호도 함께 노출됩니다.
+읽기 전용 키나 서비스 단위 키는 제공되지 않으니, **필요할 때 만들고 쓰고 나면
+폐기**하는 편이 안전합니다.
