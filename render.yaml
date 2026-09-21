@@ -45,10 +45,13 @@ services:
       - key: GROQ_API_KEY
         sync: false
 
-      # Images and scans have no text to redact, so the file itself goes to the
-      # model. Set to 0 where that is not permitted.
+      # Off here, on purpose. The compliance position is that identity is masked
+      # before a document leaves the process - and an image has no text to mask, so
+      # the file goes to the model as it arrived. That is the one path masking cannot
+      # cover, so it is not the default on a hosted deployment. Set to 1 knowingly.
+      # The desk's own machine is unaffected; it still defaults to on.
       - key: TERMSHEET_ALLOW_IMAGE
-        value: "1"
+        value: "0"
 
       # Writable storage for the holiday calendars, on the disk mounted below.
       - key: PRICER_DATA_DIR

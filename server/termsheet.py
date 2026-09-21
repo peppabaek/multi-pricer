@@ -357,11 +357,23 @@ _PARTY_LABELS = (
     r"Buyer|Seller|Dealer|Borrower|Lender|Beneficiary|Obligor|Issuer|Guarantor|"
     r"Account\s*Name|Legal\s*Name|Company\s*Name|Contact|Attention|Attn|"
     r"To|From|Broker|Agent|Payments?\s*to(?:\s*Party\s*[AB])?|"
-    r"거래상대방|거래상대|고객명|상대방|매수인|매도인"
+    r"Reference(?!\s*(?:Rate|Index|Obligation|Period|Amount|Entity))|Ref\.?|"
+    r"Deal\s*(?:ID|No|Number|Ref)|Trade\s*(?:ID|No|Number|Ref)|"
+    r"Signed\s*by|Authori[sz]ed\s*Signatory|Signatory|By|"
+    r"거래상대방|거래상대|고객명|상대방|매수인|매도인|"
+    r"담당자|연락처|성명|서명|발행인|판매사|수탁자|거래처"
 )
 
 # Corporate suffixes catch letterheads and signature blocks, where the name carries no
 # label at all. No pricing term contains these words, so this cannot eat a rate or a date.
+# Korean corporate suffixes. A name ending in one of these is a company, and no
+# pricing term does - so this cannot eat a rate, a tenor or a convention.
+_KO_ENTITY_SUFFIX = (
+    r"투자증권|금융투자|증권|은행|저축은행|보험|생명|화재|해상|"
+    r"자산운용|운용|선물|캐피탈|종합금융|종금|신탁|파이낸셜|"
+    r"홀딩스|지주|금고|조합|공사|공단"
+)
+
 _ENTITY_WORDS = (
     r"Bank|Banking|Securities|Capital|Markets|Investment|Investments|Futures|"
     r"Asset\s+Management|Trust|Holdings|Partners|Financial|Finance|"
@@ -372,7 +384,9 @@ _ENTITY_WORDS = (
 # still be capitalised - (?-i:[A-Z]) keeps that check case-sensitive - and at least one
 # is required, so a bare prose word like "trust" is never swallowed.
 _ENTITY_RE = re.compile(
-    rf"\b(?:(?-i:[A-Z])[\w'&.\-]*\s+){{1,4}}(?:{_ENTITY_WORDS})(?:\s+(?:{_ENTITY_WORDS}))*",
+    rf"\b(?:(?-i:[A-Z])[\w'&.\-]*\s+){{1,4}}(?:{_ENTITY_WORDS})(?:\s+(?:{_ENTITY_WORDS}))*"
+    rf"|(?:\(주\)\s*)?[가-힣]{{2,10}}(?:{_KO_ENTITY_SUFFIX})(?:\s*\(주\)|\s*주식회사)?"
+    rf"|주식회사\s*[가-힣]{{2,10}}",
     re.IGNORECASE,
 )
 _ID_LABELS = (
