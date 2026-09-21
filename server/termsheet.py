@@ -7,6 +7,7 @@ text is sent to the model - and every intermediate is dropped when the request e
 
 import io
 import os
+import sys
 import re
 import time
 import hashlib
@@ -41,10 +42,28 @@ def load_env_file(path: str = _ENV_FILE) -> None:
                 if key and val:
                     os.environ[key] = val
     except Exception as e:
-        print(f"[Termsheet] .env read failed: {e}")
+        _log(f"[Termsheet] .env read failed: {e}")
 
 
 load_env_file()
+
+
+def _log(message: str) -> None:
+    """
+    Write a diagnostic line, whatever the console can encode.
+
+    These messages carry Korean and em-dashes, and a console on a legacy code page
+    raises UnicodeEncodeError on them. That is a subclass of ValueError, so a failed
+    print did not merely lose a log line - it surfaced as a 400 blaming the document.
+    """
+    try:
+        print(message)
+    except Exception:
+        try:
+            enc = getattr(sys.stdout, "encoding", None) or "ascii"
+            sys.stdout.write(message.encode(enc, "replace").decode(enc, "replace") + "\n")
+        except Exception:
+            pass
 
 
 def extraction_status() -> Dict[str, Any]:
@@ -1133,7 +1152,7 @@ def schedule_preview(draft: Dict[str, Any]) -> List[Dict[str, Any]]:
         return rows
     except Exception as e:
         # A preview is a convenience; never let it cost the trader the extraction.
-        print(f"[Termsheet] schedule preview unavailable: {e}")
+        _log(f"[Termsheet] schedule preview unavailable: {e}")
         return []
 
 
@@ -1295,7 +1314,7 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
                 second_extractor = secondary_extractor()
         except Exception as e:
             second_error = str(e)
-            print(f"[Termsheet] second provider unavailable: {e}")
+            _log(f"[Termsheet] second provider unavailable: {e}")
     adjudication = None
     if second_extractor is not None:
         try:
@@ -1323,7 +1342,7 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
                             setattr(trade, field, value)
         except Exception as e:
             second_error = str(e)
-            print(f"[Termsheet] cross-validation failed: {e}")
+            _log(f"[Termsheet] cross-validation failed: {e}")
             comparison = {"compared": False, "error": str(e)}
 
     if not trade.supported:

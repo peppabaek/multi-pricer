@@ -201,6 +201,47 @@ def t_10():
             raise AssertionError(f"a key is hard-coded in the blueprint: {line.strip()}")
 
 
+@case("L18-11", "a console that cannot encode the log does not fail the upload")
+def t_11():
+    # The diagnostics carry Korean and em-dashes. On a legacy code page print raises
+    # UnicodeEncodeError, which is a subclass of ValueError - so a lost log line came
+    # back to the browser as a 400 blaming the document.
+    import server.termsheet as tsmod
+
+    class _Cp949Console:
+        encoding = "cp949"
+
+        def write(self, text):
+            text.encode("cp949")      # raises on anything it cannot represent
+            return len(text)
+
+        def flush(self):
+            pass
+
+    saved = sys.stdout
+    sys.stdout = _Cp949Console()
+    try:
+        tsmod._log("[Termsheet] 교차검증 미실행 \u2014 GROQ_API_KEY 를 설정하세요")
+    except Exception as e:
+        sys.stdout = saved
+        raise AssertionError(f"a log line failed instead of degrading: {type(e).__name__}")
+    finally:
+        sys.stdout = saved
+
+
+@case("L18-12", "the upload endpoint's dependencies are declared, not inherited")
+def t_12():
+    # python-multipart is what FastAPI parses an upload with. It was installed here by
+    # accident and in neither requirements file, so a clean install - which is what a
+    # host does - could not start the app at all.
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    for name in ("requirements.txt", "requirements-deploy.txt"):
+        with open(os.path.join(root, name), encoding="utf-8") as f:
+            body = "\n".join(l for l in f if not l.strip().startswith("#"))
+        if "python-multipart" not in body:
+            raise AssertionError(f"{name} does not declare python-multipart")
+
+
 if __name__ == "__main__":
     print("\n=== L18 Hosted deployment ===")
     sys.exit(1 if run_all("L18") else 0)

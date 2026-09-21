@@ -20,6 +20,11 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
+      # Logs carry Korean; unbuffered so they appear in Render's log tail as they happen.
+      - key: PYTHONIOENCODING
+        value: utf-8
+      - key: PYTHONUNBUFFERED
+        value: "1"
 
       # Required. Without both, the dashboard answers 503 rather than serving a
       # term sheet uploader to anyone who finds the URL.
