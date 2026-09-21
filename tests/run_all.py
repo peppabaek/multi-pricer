@@ -26,6 +26,7 @@ SUITES = [
     ("L18 Hosted deployment", "test_l18_deploy.py"),
     ("L19 Counterparty masking", "test_l19_masking.py"),
     ("L20 Refusal judgement", "test_l20_refusal.py"),
+    ("L21 Upload responsiveness", "test_l21_responsiveness.py"),
 ]
 
 total_fail = 0

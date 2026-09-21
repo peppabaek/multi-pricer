@@ -63,7 +63,10 @@ class TraditionMarketFeed:
         self.quotes: Dict[str, Dict[str, Any]] = {}
         self.is_lseg_live_connected: bool = False
         self.app_key: str = ""
-        self.lseg_status_message: str = "LSEG Workspace Desktop (Port 9000 Ready)"
+        # Not "Ready": nothing has been reached yet, and on a host there is no
+        # Workspace desktop to reach at all. A pricer that says the feed is ready
+        # while serving baseline quotes is worse than one that says nothing.
+        self.lseg_status_message: str = "LSEG Workspace 미연결 — 기준호가 사용 중"
         
         # Load saved App Key
         self._load_saved_app_key()

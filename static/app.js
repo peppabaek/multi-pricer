@@ -1154,9 +1154,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (payloadData.timestamp) {
                     elements.snapshotTimestamp.textContent = payloadData.timestamp.split(" ")[1] || "--:--:--";
                     markSnapshotTaken();
-                    if (payloadData.is_live_connected) {
-                        elements.liveConnectedBadge.style.display = "inline-flex";
-                    }
+                    // Both ways. This only ever turned LIVE on, and the badge is in
+                    // the markup, so a dashboard with no feed at all still said LIVE -
+                    // which is the one thing a pricer must never claim falsely.
+                    setFeedBadge(payloadData.is_live_connected);
                 }
 
                 // Automatically re-calculate pricing with freshly reloaded market rates
@@ -2339,6 +2340,16 @@ document.addEventListener("DOMContentLoaded", () => {
     function chip(text, color, bg, border) {
         return `<span style="font-size:10px;font-weight:700;color:${color};background:${bg};` +
                `padding:2px 6px;border-radius:4px;border:1px solid ${border};margin-left:6px;">${text}</span>`;
+    }
+
+    function setFeedBadge(isLive) {
+        const live = elements.liveConnectedBadge;
+        const base = document.getElementById("base-quote-badge");
+        if (live) live.hidden = !isLive;
+        if (base) {
+            base.hidden = Boolean(isLive);
+            base.title = "실시간 피드에 연결되지 않아 기준호가로 계산 중입니다";
+        }
     }
 
     function updateCurveModelBadge() {

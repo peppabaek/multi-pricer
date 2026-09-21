@@ -38,6 +38,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from starlette.formparsers import MultiPartParser
 
 # Keep uploaded termsheets in memory. Starlette spools multipart bodies to a temp file
@@ -1182,7 +1183,12 @@ async def extract_termsheet(request: Request, file: UploadFile = File(...)):
                 detail=f"파일이 너무 큽니다 ({len(raw)/1024/1024:.1f}MB). 최대 20MB까지 지원합니다"
             )
         try:
-            result = process_termsheet(raw, filename=file.filename or "")
+            # In a threadpool, not inline. Reading a term sheet takes 45-60 seconds
+            # in the model, and awaiting nothing during it holds the event loop - the
+            # server answers nothing at all meanwhile, health checks included, so the
+            # host concludes the instance is dead and restarts it. That is the 502.
+            result = await run_in_threadpool(
+                process_termsheet, raw, filename=file.filename or "")
         except HTTPException:
             raise
         except ValueError as e:

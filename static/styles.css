@@ -2923,3 +2923,11 @@ select:focus {
 
 
 
+
+/* Serving baseline quotes, not a live feed. Deliberately not green. */
+.base-quote-badge {
+    font-size: 10px; font-weight: 700; color: #b45309;
+    background: #fffbeb; border: 1px solid #fcd34d;
+    padding: 2px 7px; border-radius: 4px; white-space: nowrap;
+}
+.base-quote-badge[hidden], .live-connected-badge[hidden] { display: none !important; }

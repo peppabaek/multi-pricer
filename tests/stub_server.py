@@ -23,6 +23,19 @@ from test_l11_scenarios import _stub      # noqa: E402
 
 # TS-B is the amortising sample the browser tests assert against.
 _extract = _stub("TS-B")
-tsmod.call_extractor = lambda text, *a, **kw: _extract(text)
+
+# STUB_EXTRACT_DELAY stands in for the 45-60 seconds a real model takes, so a test
+# can watch whether the server still answers anything while a read is in flight.
+_DELAY = float(os.environ.get("STUB_EXTRACT_DELAY", "0") or 0)
+
+
+def _stub_call(text, *a, **kw):
+    if _DELAY:
+        import time
+        time.sleep(_DELAY)
+    return _extract(text)
+
+
+tsmod.call_extractor = _stub_call
 
 from server.app import app                # noqa: E402,F401
