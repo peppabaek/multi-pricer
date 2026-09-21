@@ -170,6 +170,53 @@ def t_7():
         raise AssertionError("재시도 실패로 원래 사유가 사라짐")
 
 
+@case("L20-8", "시트가 여러 개면 거래 스케줄을 골라 표시한다")
+def t_8():
+    # 모델을 설득하는 대신 충돌을 먼저 없앤다: 어느 시트가 거래인지는 행 수를 세면
+    # 되는 문제이지 판단이 필요한 문제가 아니다.
+    import io as _io, openpyxl
+    from server.termsheet import extract_text
+
+    wb = openpyxl.Workbook()
+    a = wb.active; a.title = "스케쥴"
+    a.append(["시작일", "만기일", "명목금액"])
+    for i in range(6):
+        a.append([f"2026-{9+i:02d}-22", f"2026-{10+i:02d}-22", 2500000000 - i * 1000000])
+    b = wb.create_sheet("Sheet1")
+    b.append(["Start", "End", "Nominal"])
+    for i in range(2):
+        b.append([f"2026-{9+i:02d}-18", f"2026-{10+i:02d}-18", 2500000000])
+    buf = _io.BytesIO(); wb.save(buf)
+
+    text = extract_text(buf.getvalue(), "t.xlsx")
+    labels = [l for l in text.splitlines() if l.startswith("--- sheet")]
+    trade = [l for l in labels if "TRADE SCHEDULE" in l]
+    ref = [l for l in labels if "REFERENCE ONLY" in l]
+    if len(trade) != 1 or "스케쥴" not in trade[0]:
+        raise AssertionError(f"긴 스케줄이 거래로 선택되지 않음: {labels}")
+    if len(ref) != 1 or "Sheet1" not in ref[0]:
+        raise AssertionError(f"나머지 시트가 참고로 표시되지 않음: {labels}")
+
+
+@case("L20-9", "시트가 하나뿐이면 라벨을 붙이지 않는다")
+def t_9():
+    import io as _io, openpyxl
+    from server.termsheet import extract_text
+
+    wb = openpyxl.Workbook()
+    a = wb.active; a.title = "Terms"
+    a.append(["시작일", "만기일", "명목금액"])
+    for i in range(4):
+        a.append([f"2026-{9+i:02d}-22", f"2026-{10+i:02d}-22", 100000000])
+    buf = _io.BytesIO(); wb.save(buf)
+
+    text = extract_text(buf.getvalue(), "t.xlsx")
+    if "TRADE SCHEDULE" in text or "REFERENCE ONLY" in text:
+        raise AssertionError("선택할 것이 없는데 시트를 골랐다고 표시함")
+    if "2026-09-22" not in text:
+        raise AssertionError("스케줄이 사라짐")
+
+
 if __name__ == "__main__":
     print("\n=== L20 거절 판정 ===")
     sys.exit(1 if run_all("L20") else 0)

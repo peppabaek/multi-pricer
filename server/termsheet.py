@@ -170,19 +170,41 @@ def sniff_kind(raw: bytes, filename: str = "") -> str:
     return "text"
 
 
+_DATEISH = re.compile(r"^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$")
+
+
+def _schedule_rows(lines: List[str]) -> int:
+    """How many rows of this sheet look like a schedule period: two dates and a number."""
+    n = 0
+    for line in lines:
+        cells = [c.strip() for c in line.split("\t")]
+        dates = sum(1 for c in cells if _DATEISH.match(c))
+        numeric = sum(1 for c in cells
+                      if c.replace(",", "").replace(".", "").isdigit() and len(c) >= 4)
+        if dates >= 2 and numeric >= 1:
+            n += 1
+    return n
+
+
 def _xlsx_text(raw: bytes) -> str:
     """
-    Every sheet as tab-separated rows.
+    Every sheet as tab-separated rows, with the trade schedule named.
 
     Tab-separated is not incidental: an Excel term sheet usually carries the schedule
     as a block of cells, and this is the shape the rollercoaster parser already reads.
+
+    A workbook often holds more than one schedule - a working copy, an earlier draft,
+    a second leg. Handed both without comment, a model reads them as one trade
+    contradicting itself and refuses the document. So the sheets are compared here,
+    where it is a matter of counting rows rather than judgement, and the longest
+    schedule is marked as the trade while the rest are marked reference.
     """
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
-    out = []
+    sheets: List[Tuple[str, List[str]]] = []
     try:
         for ws in wb.worksheets:
-            out.append(f"--- sheet: {ws.title} ---")
+            lines = []
             for row in ws.iter_rows(values_only=True):
                 cells = ["" if c is None else
                          (c.strftime("%Y-%m-%d") if hasattr(c, "strftime") else str(c))
@@ -190,9 +212,29 @@ def _xlsx_text(raw: bytes) -> str:
                 while cells and not cells[-1]:
                     cells.pop()
                 if cells:
-                    out.append("\t".join(cells))
+                    lines.append("\t".join(cells))
+            sheets.append((ws.title, lines))
     finally:
         wb.close()
+
+    counts = {title: _schedule_rows(lines) for title, lines in sheets}
+    with_schedule = [t for t, n in counts.items() if n >= 2]
+    primary = max(with_schedule, key=lambda t: counts[t]) if len(with_schedule) > 1 else None
+
+    out = []
+    for title, lines in sheets:
+        if primary is None:
+            label = f"--- sheet: {title} ---"
+        elif title == primary:
+            label = (f"--- sheet: {title} --- TRADE SCHEDULE: price this one "
+                     f"({counts[title]} periods) ---")
+        elif counts.get(title, 0) >= 2:
+            label = (f"--- sheet: {title} --- REFERENCE ONLY: another copy of the "
+                     f"schedule, do not use and do not treat as a contradiction ---")
+        else:
+            label = f"--- sheet: {title} ---"
+        out.append(label)
+        out.extend(lines)
     return "\n".join(out)
 
 
