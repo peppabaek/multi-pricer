@@ -192,9 +192,21 @@ def t_10():
     with open(os.path.join(root, "render.yaml"), encoding="utf-8") as f:
         blueprint = f.read()
     for needed in ("requirements-deploy.txt", "$PORT", "/healthz",
-                   "PRICER_AUTH_USER", "PRICER_AUTH_PASS", "PRICER_DATA_DIR"):
+                   "PRICER_AUTH_USER", "PRICER_AUTH_PASS"):
         if needed not in blueprint:
             raise AssertionError(f"blueprint does not mention {needed!r}")
+
+    # A disk and the variable that points at it belong together: a mount nothing uses
+    # is wasted, and PRICER_DATA_DIR without a disk writes holiday edits to a
+    # filesystem that is rebuilt on deploy, which loses them while looking like it
+    # worked.
+    live = "\n".join(l for l in blueprint.splitlines()
+                      if not l.strip().startswith("#"))
+    has_disk = "mountPath:" in live
+    uses_dir = "PRICER_DATA_DIR" in live
+    if has_disk != uses_dir:
+        raise AssertionError(
+            f"disk and PRICER_DATA_DIR disagree: disk={has_disk} var={uses_dir}")
     # Secrets are entered in the dashboard, never committed here.
     for line in blueprint.splitlines():
         if "API_KEY" in line and "value:" in line:

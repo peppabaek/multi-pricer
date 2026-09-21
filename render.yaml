@@ -10,7 +10,12 @@ services:
   - type: web
     name: multipricer
     runtime: python
-    plan: starter            # free spins down when idle; a cold start takes ~1 min
+    # Free: no card, and enough for the pricer and term sheet extraction. It spins
+    # down when idle, so the first request after a quiet spell waits about a minute,
+    # and it cannot carry a persistent disk - see the note on holidays below.
+    # For a desk that needs it always warm, change to `starter` (paid) and re-add the
+    # disk and PRICER_DATA_DIR commented out at the bottom of this file.
+    plan: free
     region: singapore        # nearest to Seoul
     buildCommand: pip install -r requirements-deploy.txt
     startCommand: uvicorn server.app:app --host 0.0.0.0 --port $PORT
@@ -45,8 +50,10 @@ services:
 
       # Second opinion. Leave the key unset to run single-model; the review popup
       # says so rather than implying two models agreed.
-      - key: TERMSHEET_SECOND_PROVIDER
-        value: groq
+      # Turn on once a Groq key exists; naming it without one makes every upload
+      # report a cross-check that did not run.
+      # - key: TERMSHEET_SECOND_PROVIDER
+      #   value: groq
       - key: GROQ_API_KEY
         sync: false
 
@@ -58,13 +65,17 @@ services:
       - key: TERMSHEET_ALLOW_IMAGE
         value: "0"
 
-      # Writable storage for the holiday calendars, on the disk mounted below.
-      - key: PRICER_DATA_DIR
-        value: /var/data
 
-    # Holidays added through the dashboard are written to holidays_data.json. Without
-    # a disk, Render's filesystem resets on every deploy and those edits are lost.
-    disk:
-      name: pricer-data
-      mountPath: /var/data
-      sizeGB: 1
+# Holidays: with no disk, a holiday added through the dashboard lives only until the
+# next deploy. The 18 bundled calendars still load and price correctly - what is lost
+# is an edit made after deployment, which has to be committed to holidays_data.json
+# instead. To keep those edits, move to a paid plan and restore:
+#
+#     plan: starter
+#     envVars:
+#       - key: PRICER_DATA_DIR
+#         value: /var/data
+#     disk:
+#       name: pricer-data
+#       mountPath: /var/data
+#       sizeGB: 1
