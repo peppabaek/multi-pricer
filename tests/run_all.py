@@ -25,6 +25,7 @@ SUITES = [
     ("L17 Stub periods (amortising)", "test_l17_stub_periods.py"),
     ("L18 Hosted deployment", "test_l18_deploy.py"),
     ("L19 Counterparty masking", "test_l19_masking.py"),
+    ("L20 Refusal judgement", "test_l20_refusal.py"),
 ]
 
 total_fail = 0

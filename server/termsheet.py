@@ -624,9 +624,22 @@ Rules:
 6. Amortising, accreting or step-up structures: return every period in leg1_custom_schedule
    (and leg2_custom_schedule if the legs differ). Dates as YYYY-MM-DD.
 
-7. If the trade is something this pricer cannot value - callable, cancellable, CMS-linked,
-   range accrual, any optionality - set supported=false with a reason and leave the terms null.
-   Do not force it into a vanilla shape.
+7. supported=false is ONLY for a product this pricer cannot value: callable,
+   cancellable, CMS-linked, range accrual, or any optionality. Nothing else.
+
+   In particular, NEVER set supported=false because:
+     - the document is missing a rate, an index, a spread or any other term. A
+       schedule with no rate on it is a normal thing to receive; leave those fields
+       null, and the trader supplies them.
+     - the document is ambiguous, or you are unsure.
+     - a workbook holds more than one schedule or more than one sheet.
+   In all of those cases set supported=true, extract what the document does state,
+   and put your doubt in open_questions. Do not force a trade into a vanilla shape.
+
+8. A workbook may carry several sheets. Extract the one that describes the trade
+   being priced - normally the longest schedule, or the one whose dates agree with
+   the stated effective and maturity dates. Do not merge two schedules. Name the
+   other sheets in open_questions so the trader can say which is right.
 
 8. Put anything the trader should confirm with the counterparty into open_questions.
 
@@ -1246,6 +1259,34 @@ def render_paste(rows: List[Dict[str, Any]]) -> str:
     return "\n".join(out)
 
 
+# Features this pricer genuinely cannot value. A refusal naming none of these is
+# about missing or ambiguous data, which is the trader's job, not grounds to discard
+# the document.
+_UNPRICEABLE = (
+    "callable", "cancellable", "cancelable", "puttable", "swaption", "option",
+    "optionality", "bermudan", "american", "cms", "constant maturity",
+    "range accrual", "digital", "barrier", "knock", "exotic", "inflation",
+    "조기상환", "중도상환", "콜옵션", "풋옵션", "옵션", "버뮤단",
+)
+
+INSIST_NOTE = """
+
+--- NOTE TO THE EXTRACTOR ---
+A previous read of this document returned supported=false for a reason that was not
+about the product type. That is not a valid refusal here. Unless this trade is
+callable, cancellable, CMS-linked, a range accrual or otherwise optional, set
+supported=true and extract every term the document does state, leaving the rest null.
+Missing rates, missing indices, several sheets or an ambiguous layout are all normal;
+record them in open_questions instead of refusing.
+"""
+
+
+def refusal_is_about_product(reason: Optional[str]) -> bool:
+    """Whether a supported=false actually names something this pricer cannot value."""
+    low = (reason or "").lower()
+    return any(word in low for word in _UNPRICEABLE)
+
+
 # ---------------------------------------------------------------- 7. orchestration
 def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
                       reviewers=None, filename: str = "") -> Dict[str, Any]:
@@ -1344,6 +1385,25 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
             second_error = str(e)
             _log(f"[Termsheet] cross-validation failed: {e}")
             comparison = {"compared": False, "error": str(e)}
+
+    if not trade.supported and not refusal_is_about_product(trade.unsupported_reason) \
+            and extractor is None:
+        # The model refused over missing or ambiguous data rather than the product.
+        # Ask once more, saying so - a schedule the trader could have completed in the
+        # popup is otherwise lost at the door.
+        _log(f"[Termsheet] refusal not about the product, retrying: "
+             f"{trade.unsupported_reason}")
+        try:
+            retry = call_extractor(redacted_text + INSIST_NOTE, used=used)
+            if retry.supported:
+                warnings_from_retry = (
+                    "1차 판독에서 '평가 불가'로 분류했으나 상품 유형 문제가 아니어서 "
+                    f"다시 읽었습니다 — 원래 사유: {trade.unsupported_reason}")
+                trade = retry
+                trade.open_questions = list(trade.open_questions or []) + [
+                    warnings_from_retry]
+        except Exception as e:
+            _log(f"[Termsheet] retry failed: {e}")
 
     if not trade.supported:
         return {
