@@ -68,9 +68,12 @@ class CRSFeed:
             self.ek = ek
             app_key = self.config.get("app_key", "")
             port = self.config.get("port", 9000)
-            if app_key and app_key != "YOUR_APP_KEY":
-                self.ek.set_app_key(app_key)
+            from .eikon_rate_limiter import workspace_listening
+            if app_key and app_key != "YOUR_APP_KEY" and workspace_listening(port):
+                # Port before key: set_app_key hands shakes straight away, and without
+                # a port it builds http://127.0.0.1:None/api/handshake.
                 self.ek.set_port_number(port)
+                self.ek.set_app_key(app_key)
                 self.is_connected = True
                 self.status_message = "🟢 LIVE LSEG Workspace (Prebon KRUSQ CRS Feed)"
             else:

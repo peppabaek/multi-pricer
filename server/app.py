@@ -38,6 +38,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 from starlette.concurrency import run_in_threadpool
 from starlette.formparsers import MultiPartParser
 
@@ -1468,10 +1469,21 @@ class HolidayAddRequest(BaseModel):
     cal_code: str = "SEB"
     date_str: str # 'YYYY-MM-DD'
 
-@app.on_event("startup")
-async def calendar_startup_event():
-    # Start the automated daily holiday updater scheduler in background (runs at 00:05 KST)
-    asyncio.create_task(holiday_updater_service.start_daily_scheduler(run_at_hour=0, run_at_minute=5))
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """
+    Startup and shutdown. on_event is deprecated and slated for removal, and a
+    DeprecationWarning on every boot is one more line hiding the ones that matter.
+    """
+    task = asyncio.create_task(
+        holiday_updater_service.start_daily_scheduler(run_at_hour=0, run_at_minute=5))
+    try:
+        yield
+    finally:
+        task.cancel()
+
+
+app.router.lifespan_context = _lifespan
 
 @app.get("/api/calendar/status")
 def get_calendar_info():

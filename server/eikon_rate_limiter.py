@@ -32,6 +32,24 @@ class EikonManager:
         self._port = 9000
         self._rate_limit_until = 0.0
 
+def workspace_listening(port: int = 9000, timeout: float = 0.35) -> bool:
+    """
+    Whether anything is accepting connections on the Workspace API port.
+
+    eikon's set_app_key performs a handshake as a side effect, and when the desktop
+    is not running that prints several lines of its own errors before failing. A
+    35ms check first keeps startup quiet and quick, and - on a host, where there is
+    no desktop at all - avoids the attempt entirely.
+    """
+    import socket
+    try:
+        with socket.socket() as sk:
+            sk.settimeout(timeout)
+            return sk.connect_ex(("127.0.0.1", int(port or 0))) == 0
+    except Exception:
+        return False
+
+
     def _ensure_init(self):
         if not self._initialized:
             try:
@@ -43,8 +61,16 @@ class EikonManager:
                         self._app_key = cfg.get("lseg_app_key") or cfg.get("app_key")
                         self._port = cfg.get("port", 9000)
                 if self._app_key and self._app_key != "YOUR_APP_KEY":
-                    self._ek.set_app_key(self._app_key)
+                    if not workspace_listening(self._port):
+                        # Nothing to hand shake with. set_app_key would try anyway and
+                        # print its own failures, which is the noise at startup.
+                        self._ek = None
+                        return
+                    # Port first: set_app_key hands shakes immediately, and with no
+                    # port set yet it builds http://127.0.0.1:None/api/handshake and
+                    # fails on "Invalid port: 'None'".
                     self._ek.set_port_number(self._port)
+                    self._ek.set_app_key(self._app_key)
                     try:
                         self._ek.set_log_level(1)
                     except Exception:
