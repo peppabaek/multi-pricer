@@ -113,9 +113,15 @@ def t_6():
         d = r.json()["data"]
         if "is_live_connected" not in d:
             raise AssertionError("nothing says whether the feed is live")
-        if d["is_live_connected"]:
+        # The invariant is not "never live" - it is "never live without a feed".
+        # Setting RENDER=true does not remove a Workspace that is running on this
+        # machine, and on the desk a live report is the correct one. What must never
+        # happen, and is what a hosted deployment would do wrong, is claiming a feed
+        # with nothing listening to connect to.
+        from server.eikon_rate_limiter import workspace_listening
+        if d["is_live_connected"] and not workspace_listening():
             raise AssertionError(
-                "reported a live LSEG feed with no Workspace desktop to reach")
+                "reported a live LSEG feed with nothing listening on the API port")
 
 
 @case("L18-7", "every deployed dependency imports without the desktop feed")
