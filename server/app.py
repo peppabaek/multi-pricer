@@ -338,11 +338,38 @@ def _build_usd_curve(snapshot: Dict[str, Any], p_date_str: Optional[str] = None,
         curve = bootstrap_sofr_curve(pricing_date, settle_date, quote_tuples)
     return curve
 
+# Which feeds have pulled live quotes at least once in this process.
+_WARMED: set = set()
+
+
+def _warm_once(name: str, feed) -> None:
+    """
+    Pull live quotes the first time a currency is asked for.
+
+    Each feed starts on its baseline quotes and only goes live on an explicit reload,
+    so opening the dashboard showed BASE with yesterday's numbers until someone
+    pressed F5 - which reads as "not connected" even with Workspace running right
+    there. One fetch per currency per process, and only when Workspace is actually
+    listening, so a desk without it pays nothing and a host never tries.
+    """
+    if name in _WARMED:
+        return
+    _WARMED.add(name)          # 실패해도 매 요청마다 재시도하지 않는다
+    try:
+        from server.eikon_rate_limiter import workspace_listening
+        if workspace_listening():
+            feed.trigger_on_demand_refresh()
+    except Exception as e:
+        print(f"[Market] {name} first fetch failed: {e}")
+
+
 @app.get("/api/market-snapshot")
 def get_market_snapshot(pricing_date: Optional[str] = None, settle_date: Optional[str] = None, curve_type: Optional[str] = "Standard", reload: Optional[bool] = False):
     """[USD] Get immutable market data snapshot and bootstrapped curve (<0.1ms)"""
     if reload:
         tradition_feed.trigger_on_demand_refresh()
+    else:
+        _warm_once("usd", tradition_feed)
     snapshot = tradition_feed.get_snapshot()
     curve = _build_usd_curve(snapshot, pricing_date, settle_date, curve_type)
     
@@ -522,6 +549,8 @@ def get_krw_market_snapshot(pricing_date: Optional[str] = None, settle_date: Opt
     """[KRW] Get immutable market data snapshot and bootstrapped KRW curve (<0.1ms)"""
     if reload:
         krw_feed.trigger_on_demand_refresh()
+    else:
+        _warm_once("krw", krw_feed)
     snapshot = krw_feed.get_snapshot()
     curve = _build_krw_curve(snapshot, pricing_date, settle_date)
     
@@ -695,6 +724,8 @@ def get_kofr_market_snapshot(pricing_date: Optional[str] = None, settle_date: Op
     """Fetch instant live KOFR OIS snapshot and calibrated 3M curve"""
     if reload:
         kofr_feed.trigger_on_demand_refresh()
+    else:
+        _warm_once("kofr", kofr_feed)
     snapshot = kofr_feed.get_snapshot()
     curve = _build_kofr_curve(snapshot, pricing_date, settle_date)
     
@@ -888,6 +919,8 @@ def get_crs_market_snapshot(pricing_date: Optional[str] = None, settle_date: Opt
     """Returns real-time Prebon Yamane CRS Market Data & Calibrated FX SOFR Curve"""
     if reload:
         crs_feed.trigger_on_demand_refresh()
+    else:
+        _warm_once("crs", crs_feed)
     snap = crs_feed.get_snapshot()
     p_date = parse_date(pricing_date) if pricing_date else datetime.date.today()
     s_date = parse_date(settle_date) if settle_date else get_crs_spot_date(p_date, 2)

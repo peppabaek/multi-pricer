@@ -22,16 +22,6 @@ for log_name in ("eikon", "pyeikon", "httpx", "httpcore"):
 
 CONFIG_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "lseg_config.json"))
 
-class EikonManager:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._ek = None
-        self._initialized = False
-        self._last_call = 0.0
-        self._app_key = None
-        self._port = 9000
-        self._rate_limit_until = 0.0
-
 def workspace_listening(port: int = 9000, timeout: float = 0.35) -> bool:
     """
     Whether anything is accepting connections on the Workspace API port.
@@ -49,6 +39,16 @@ def workspace_listening(port: int = 9000, timeout: float = 0.35) -> bool:
     except Exception:
         return False
 
+
+class EikonManager:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._ek = None
+        self._initialized = False
+        self._last_call = 0.0
+        self._app_key = None
+        self._port = 9000
+        self._rate_limit_until = 0.0
 
     def _ensure_init(self):
         if not self._initialized:

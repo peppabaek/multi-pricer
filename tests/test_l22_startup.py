@@ -117,6 +117,67 @@ def t_5():
             raise AssertionError("프라이싱 결과가 비정상")
 
 
+@case("L22-6", "조용해진 것이 기능을 꺼서가 아닌지 확인한다")
+def t_6():
+    # L22-3 은 기동 로그가 조용한지만 봤고, 그래서 통과했다 — 이전 수정이
+    # EikonManager 의 메서드를 전부 날려 피드를 죽였는데도. 로그가 조용해진 이유가
+    # '연결을 안 해서'가 아니라 '연결할 것이 없어서'여야 한다.
+    from server.eikon_rate_limiter import EikonManager, eikon_manager
+
+    for name in ("_ensure_init", "get_data"):
+        if not hasattr(eikon_manager, name):
+            raise AssertionError(
+                f"EikonManager 에 {name} 이 없음 — 클래스 본문이 끊겼다")
+        if not callable(getattr(eikon_manager, name)):
+            raise AssertionError(f"{name} 이 호출 가능하지 않음")
+
+    # 인스턴스가 아니라 클래스에 붙어 있어야 한다.
+    if "get_data" not in vars(EikonManager):
+        raise AssertionError("get_data 가 EikonManager 의 메서드가 아님")
+
+
+@case("L22-7", "모든 시장 피드가 메서드를 온전히 갖고 있다")
+def t_7():
+    # 같은 사고가 다른 모듈에서 반복되지 않도록, 피드 객체들이 실제로 쓰이는
+    # 메서드를 갖고 있는지 본다. 없으면 AttributeError 가 상태 문구에 묻혀
+    # "Offline" 으로만 보인다 — 연결이 없는 것과 구별되지 않는다.
+    from server.tradition_feed import tradition_feed
+    from server.crs_feed import crs_feed
+    from server.kofr_feed import kofr_feed
+    from server.krw_feed import krw_feed
+    from server.kmbc_fwd_feed import kmbc_fwd_feed_instance
+
+    feeds = {
+        "tradition_feed": tradition_feed,
+        "crs_feed": crs_feed,
+        "kofr_feed": kofr_feed,
+        "krw_feed": krw_feed,
+        "kmbc_fwd_feed": kmbc_fwd_feed_instance,
+    }
+    for name, feed in feeds.items():
+        methods = [m for m in dir(type(feed))
+                   if not m.startswith("__") and callable(getattr(type(feed), m, None))]
+        if len(methods) < 2:
+            raise AssertionError(
+                f"{name}: 메서드가 {methods} 뿐 — 클래스 본문이 끊겼을 가능성")
+
+
+@case("L22-8", "연결 실패 사유가 '없어서'인지 '고장나서'인지 드러난다")
+def t_8():
+    # 'object has no attribute' 는 연결 없음이 아니라 코드 결함이다. 그것이
+    # Offline 문구에 섞여 들어가면 원인을 구별할 수 없다.
+    from fastapi.testclient import TestClient
+    from server.app import app
+
+    with TestClient(app) as client:
+        d = client.get("/api/market-snapshot").json()["data"]
+    msg = (d.get("status_message") or "")
+    for bug in ("has no attribute", "AttributeError", "TypeError", "NameError"):
+        if bug in msg:
+            raise AssertionError(
+                f"연결 상태 문구에 코드 결함이 섞여 있음: {msg!r}")
+
+
 if __name__ == "__main__":
     print("\n=== L22 기동 로그 ===")
     sys.exit(1 if run_all("L22") else 0)
