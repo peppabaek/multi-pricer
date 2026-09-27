@@ -4,6 +4,7 @@ Exposes On-Demand Snapshot, Dual-Leg Pricing, Custom Schedule Customization, and
 """
 
 import os
+import json
 import re
 import sys
 import datetime
@@ -301,6 +302,60 @@ class QuoteUpdateRequest(BaseModel):
 
 class AppKeyRequest(BaseModel):
     app_key: str
+
+@app.get("/api/lseg/status")
+def lseg_status():
+    """
+    What the Key dialog shows: whether a key is configured, whether the Workspace
+    proxy is actually listening, and whether quotes are arriving.
+
+    The dialog used to print a fixed line saying the proxy was running, which was
+    true only by coincidence - the same way the LIVE badge was. Never returns the
+    key itself, only enough of it to recognise which one is loaded.
+    """
+    from server.eikon_rate_limiter import workspace_listening
+
+    cfg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
+                                            "lseg_config.json"))
+    key, port, source = "", 9000, None
+    if os.path.exists(cfg_path):
+        source = "lseg_config.json"
+        try:
+            with open(cfg_path, encoding="utf-8") as fh:
+                cfg = json.load(fh)
+            key = cfg.get("lseg_app_key") or cfg.get("app_key") or ""
+            port = int(cfg.get("port", 9000) or 9000)
+        except Exception as e:
+            source = f"lseg_config.json (읽기 실패: {e})"
+
+    configured = bool(key) and key != "YOUR_APP_KEY" and key != "YOUR_LSEG_WORKSPACE_APP_KEY"
+    snap = tradition_feed.get_snapshot()
+    quotes = snap.get("quotes") or []
+    live = bool(snap.get("is_live_connected"))
+
+    if not configured:
+        verdict = "App Key 미설정 — Workspace 에서 APPKEY 로 발급해 입력하세요"
+    elif not workspace_listening(port):
+        verdict = f"App Key 있음 · Workspace 미실행 (127.0.0.1:{port} 응답 없음)"
+    elif live:
+        verdict = f"연동됨 — 실시간 호가 {len(quotes)}건 수신 중"
+    else:
+        verdict = "App Key 있음 · Workspace 실행 중 · 아직 호가를 받지 못함 (F5 로 조회)"
+
+    return {"status": "success", "data": {
+        "configured": configured,
+        # Enough to tell which key is loaded, never enough to use it.
+        "key_hint": (key[:4] + "…" + key[-4:]) if configured and len(key) > 10 else "",
+        "key_source": source,
+        "port": port,
+        "port_open": workspace_listening(port),
+        "is_live_connected": live,
+        "quote_count": len(quotes),
+        "last_update": snap.get("timestamp"),
+        "feed_source": snap.get("source"),
+        "verdict": verdict,
+    }}
+
 
 @app.post("/api/lseg/set-app-key")
 def set_lseg_app_key(req: AppKeyRequest):

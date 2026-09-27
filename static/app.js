@@ -3924,8 +3924,34 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // App Key Modal
+    async function showLsegStatus() {
+        // The dialog used to state that the proxy was running, as fixed text. Ask.
+        const el = elements.lsegConnStatusMsg;
+        if (!el) return;
+        el.textContent = "상태 확인 중…";
+        try {
+            const d = (await (await fetch("/api/lseg/status")).json()).data;
+            const lines = [d.verdict];
+            if (d.configured) {
+                lines.push(`App Key: ${d.key_hint} (${d.key_source || "미상"})`);
+            }
+            lines.push(`Workspace 127.0.0.1:${d.port} — `
+                       + (d.port_open ? "응답함" : "응답 없음"));
+            if (d.is_live_connected) {
+                lines.push(`최근 수신: ${d.last_update || "-"} · ${d.feed_source || ""}`);
+            }
+            el.textContent = lines.join("  |  ");
+            el.style.color = d.is_live_connected ? "#047857"
+                           : (d.configured ? "#b45309" : "#b91c1c");
+        } catch (e) {
+            el.textContent = `상태를 확인하지 못했습니다: ${e.message}`;
+            el.style.color = "#b91c1c";
+        }
+    }
+
     elements.btnOpenAppkeyModal.addEventListener("click", () => {
         elements.appkeyModalBackdrop.style.display = "flex";
+        showLsegStatus();
     });
 
     elements.appkeyModalCloseBtn.addEventListener("click", () => elements.appkeyModalBackdrop.style.display = "none");
