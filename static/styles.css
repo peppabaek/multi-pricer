@@ -2931,3 +2931,13 @@ select:focus {
     padding: 2px 7px; border-radius: 4px; white-space: nowrap;
 }
 .base-quote-badge[hidden], .live-connected-badge[hidden] { display: none !important; }
+
+/* 데스크 PC 가 중계한 호가. 직접 연결(LIVE)과 구별되어야 한다. */
+.relay-badge {
+    font-size: 10px; font-weight: 700; color: #1d4ed8;
+    background: #eff6ff; border: 1px solid #93c5fd;
+    padding: 2px 7px; border-radius: 4px; white-space: nowrap;
+}
+/* 중계가 끊겨 오래된 호가 — 초록이나 파랑으로 두면 안 된다. */
+.relay-badge.stale { color: #b91c1c; background: #fef2f2; border-color: #fca5a5; }
+.relay-badge[hidden] { display: none !important; }

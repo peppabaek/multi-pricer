@@ -40,6 +40,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+from server import relay
 from starlette.concurrency import run_in_threadpool
 from starlette.formparsers import MultiPartParser
 
@@ -442,6 +443,7 @@ def get_market_snapshot(pricing_date: Optional[str] = None, settle_date: Optiona
         "status": "success",
         "data": {
             "currency": "USD",
+            "relay": relay.status("USD"),
             "source": snapshot["source"],
             "status_message": snapshot.get("status_message", "Live"),
             "is_live_connected": snapshot.get("is_live_connected", False),
@@ -572,6 +574,68 @@ def reload_and_price_usd(req: PricingRequest):
         "market_snapshot": market_snapshot
     }
 
+class RelayPushRequest(BaseModel):
+    currency: str = "USD"
+    quotes: List[Dict[str, Any]]
+    # 데스크 PC 가 LSEG 에서 실제로 받은 시각. 없으면 도착 시각으로 대신하지만,
+    # 그 사실이 화면에 표시된다.
+    source_timestamp: Optional[str] = None
+    origin: Optional[str] = None
+
+
+_RELAY_FEEDS = {}
+
+
+def _relay_feed(currency: str):
+    global _RELAY_FEEDS
+    if not _RELAY_FEEDS:
+        _RELAY_FEEDS = {
+            "USD": tradition_feed, "KRW": krw_feed,
+            "KOFR": kofr_feed, "CRS": crs_feed,
+        }
+    return _RELAY_FEEDS.get((currency or "USD").upper())
+
+
+@app.post("/api/quotes/push")
+def push_relayed_quotes(req: RelayPushRequest):
+    """
+    데스크 PC 가 받은 호가 한 세트를 통째로 받는다.
+
+    /api/quotes/update 는 테너 하나씩이라 31개를 밀려면 31번 왕복해야 한다.
+    중계는 주기적으로 도는 일이므로 한 번에 받는다.
+    """
+    feed = _relay_feed(req.currency)
+    if feed is None:
+        raise HTTPException(status_code=400,
+                            detail=f"알 수 없는 통화: {req.currency!r}")
+    if not req.quotes:
+        raise HTTPException(status_code=400, detail="호가가 비어 있습니다")
+
+    applied, skipped = 0, []
+    for q in req.quotes:
+        tenor = str(q.get("tenor") or "").strip()
+        mid = q.get("mid")
+        if not tenor or mid is None:
+            skipped.append(tenor or "?")
+            continue
+        try:
+            feed.update_quote(tenor, float(mid), q.get("bid"), q.get("ask"))
+            applied += 1
+        except Exception as e:
+            skipped.append(f"{tenor}({e})")
+
+    st = relay.record(req.currency, req.origin or "desk",
+                      req.source_timestamp, applied)
+    return {"status": "success", "data": {
+        "applied": applied, "skipped": skipped, "relay": st}}
+
+
+@app.get("/api/quotes/relay-status")
+def relay_status_all():
+    """어느 통화가 중계를 받고 있고 그 호가가 얼마나 오래됐는지."""
+    return {"status": "success", "data": relay.all_status()}
+
+
 @app.post("/api/quotes/update")
 def update_manual_quote_usd(req: QuoteUpdateRequest):
     tradition_feed.update_quote(req.tenor, req.mid, req.bid, req.ask)
@@ -623,6 +687,7 @@ def get_krw_market_snapshot(pricing_date: Optional[str] = None, settle_date: Opt
         "status": "success",
         "snapshot_info": {
             "currency": "KRW",
+            "relay": relay.status("KRW"),
             "source": snapshot["source"],
             "status_message": snapshot.get("status_message", "Live"),
             "is_live_connected": snapshot.get("is_live_connected", False),
@@ -798,6 +863,7 @@ def get_kofr_market_snapshot(pricing_date: Optional[str] = None, settle_date: Op
         "status": "success",
         "data": {
             "currency": "KRW_KOFR",
+            "relay": relay.status("KOFR"),
             "generator": "\\KRW KOFR Q 3M",
             "source": snapshot["source"],
             "status_message": snapshot.get("status_message", "Live"),
@@ -997,6 +1063,8 @@ def get_crs_market_snapshot(pricing_date: Optional[str] = None, settle_date: Opt
     snap["curve_pillars"] = bootstrapped_curve
     snap["settle_date"] = s_date.strftime("%Y-%m-%d")
     snap["pricing_date"] = p_date.strftime("%Y-%m-%d")
+    # 다른 통화 스냅샷과 같은 자리에 중계 상태를 실어 보낸다.
+    snap = dict(snap, relay=relay.status("CRS"))
     return {"status": "success", "data": snap}
 
 @app.post("/api/crs/price")

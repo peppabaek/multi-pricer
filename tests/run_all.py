@@ -29,6 +29,7 @@ SUITES = [
     ("L21 Upload responsiveness", "test_l21_responsiveness.py"),
     ("L22 Startup log", "test_l22_startup.py"),
     ("L23 LSEG status panel", "test_l23_lseg_status.py"),
+    ("L24 Desk relay", "test_l24_relay.py"),
 ]
 
 total_fail = 0

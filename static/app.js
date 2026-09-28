@@ -1157,7 +1157,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     // Both ways. This only ever turned LIVE on, and the badge is in
                     // the markup, so a dashboard with no feed at all still said LIVE -
                     // which is the one thing a pricer must never claim falsely.
-                    setFeedBadge(payloadData.is_live_connected);
+                    setFeedBadge(payloadData.is_live_connected, payloadData.relay);
                 }
 
                 // Automatically re-calculate pricing with freshly reloaded market rates
@@ -2342,12 +2342,30 @@ document.addEventListener("DOMContentLoaded", () => {
                `padding:2px 6px;border-radius:4px;border:1px solid ${border};margin-left:6px;">${text}</span>`;
     }
 
-    function setFeedBadge(isLive) {
+    function setFeedBadge(isLive, relayState) {
+        // 세 가지는 서로 다른 것이다. LIVE 는 이 서버가 LSEG 에 직접 붙은 것,
+        // RELAY 는 데스크 PC 가 보내준 호가, BASE 는 아무 피드도 없는 기준호가.
+        // RELAY 를 LIVE 로 보이게 하면 데스크가 꺼진 뒤에도 실시간처럼 읽힌다.
         const live = elements.liveConnectedBadge;
         const base = document.getElementById("base-quote-badge");
+        const rly = document.getElementById("relay-badge");
+        const relaying = Boolean(relayState && relayState.active);
+
         if (live) live.hidden = !isLive;
+        if (rly) {
+            rly.hidden = isLive || !relaying;
+            if (relaying) {
+                const age = Math.round(relayState.age_seconds || 0);
+                const when = age < 120 ? `${age}s` : `${Math.round(age / 60)}m`;
+                rly.textContent = `● RELAY (${when})`;
+                rly.classList.toggle("stale", Boolean(relayState.stale));
+                rly.title = relayState.stale
+                    ? `데스크 중계 호가가 ${when} 지났습니다 — 데스크 PC 연결을 확인하세요`
+                    : `데스크 PC(${relayState.origin || "-"}) 중계 · 원본 ${relayState.source_time || "-"}`;
+            }
+        }
         if (base) {
-            base.hidden = Boolean(isLive);
+            base.hidden = Boolean(isLive) || relaying;
             base.title = "실시간 피드에 연결되지 않아 기준호가로 계산 중입니다";
         }
     }
