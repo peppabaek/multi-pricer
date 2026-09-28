@@ -897,6 +897,15 @@ body {
     font-weight: 600;
 }
 
+/* Every table sits in one of these, and some of them are wider than the panel -
+   the dual schedule comparison is a fixed 1500px. Without this the right-hand
+   columns (Leg 2's dates and amounts) were simply unreachable on anything
+   narrower than a 1500px panel, which includes a 1280px laptop. */
+.table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
 .quote-table-wrapper {
     flex: 1;
     overflow-y: hidden; /* Single glance without scrollbar */
@@ -2941,3 +2950,9 @@ select:focus {
 /* 중계가 끊겨 오래된 호가 — 초록이나 파랑으로 두면 안 된다. */
 .relay-badge.stale { color: #b91c1c; background: #fef2f2; border-color: #fca5a5; }
 .relay-badge[hidden] { display: none !important; }
+
+/* Mobile-only action bar. Hidden here rather than in mobile.css so that if that
+   sheet fails to load, the bar stays hidden on desktop - where the hotkeys and
+   the trade panel's own buttons already cover these three actions. mobile.css
+   turns it on inside its phone media query. */
+.mobile-actions { display: none; }

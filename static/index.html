@@ -10,6 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css?v=3.6">
     <link rel="stylesheet" href="terminal.css?v=1">
+    <link rel="stylesheet" href="mobile.css?v=1">
     <!-- SheetJS for Excel Schedule Template Download & Upload -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
@@ -1240,5 +1241,12 @@
         document.body.appendChild(bar);
     });
     </script>
+
+    <!-- 모바일 전용 실행 막대. 데스크톱에서는 CSS 가 숨긴다 (단축키가 있으므로). -->
+    <nav class="mobile-actions" id="mobile-actions" aria-label="Quick actions">
+        <button type="button" id="m-btn-reload" title="Reload market data (F5)">Reload</button>
+        <button type="button" id="m-btn-price" title="Price (Enter)">Price</button>
+        <button type="button" id="m-btn-oneshot" class="primary" title="Reload &amp; Price (F9)">Reload &amp; Price</button>
+    </nav>
 </body>
 </html>

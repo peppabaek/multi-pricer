@@ -1,0 +1,255 @@
+/* ==========================================================================
+   Mobile layout — phones and small tablets.
+   Loaded last so it can override the desktop rules without touching them.
+
+   The desktop grid collapses to two columns at 1240px, which on a 390px phone
+   left the market panel and the trade panel fighting over 195px each: the quote
+   table lost its bid/ask columns off-screen, panel titles wrapped to four lines,
+   and the header's badges, tabs and shortcut hints piled on top of each other.
+   Below 820px this is a single column instead, ordered the way a trader reads
+   it, with the keyboard-only actions given real buttons.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Tablets and small laptops (821-1240px). The grid already drops to two
+   columns here, but the header stays one non-wrapping row: the currency tabs,
+   the feed badges and the Key / Holiday buttons together need about 1020px, so
+   below that the Holiday button and the BASE / RELAY badge sat off-screen with
+   no way to reach them. Wrapping the header is enough - the body layout at
+   these widths is fine.
+   -------------------------------------------------------------------------- */
+@media (min-width: 821px) and (max-width: 1240px) {
+    .app-header {
+        flex-wrap: wrap;
+        height: auto;
+        row-gap: 6px;
+    }
+    .header-left { flex-wrap: wrap; row-gap: 6px; min-width: 0; }
+    .market-source { flex-wrap: wrap; row-gap: 4px; }
+    .currency-toggle-group { flex-wrap: wrap; row-gap: 4px; }
+    .shortcut-hints { flex-wrap: wrap; row-gap: 4px; }
+
+    /* Two leg cards at this width give each about 390px, the same squeeze the
+       phone tier fixes - the 16ch column guide runs past the card. */
+    #rc-paste-grid-container > div { overflow-x: auto; }
+    #rc-paste-grid-container > div > div[style*="16ch"],
+    #rc-paste-input-leg1,
+    #rc-paste-input-leg2 { min-width: 72ch; }
+}
+
+@media (max-width: 820px) {
+
+    /* ---------- header: wrap instead of overlapping, and scroll away ------ */
+    .app-header {
+        flex-wrap: wrap;
+        height: auto;
+        min-height: 0;
+        row-gap: 6px;
+        padding: 6px 10px;
+        /* Sticky in the base sheet, where it is a 48px strip. Wrapped onto three
+           rows it is about 140px - a sixth of an 844px phone screen, held for
+           the whole session. The action bar at the bottom carries the controls;
+           the feed badge is a scroll away. */
+        position: static;
+    }
+    .header-left,
+    .header-right {
+        flex-wrap: wrap;
+        row-gap: 6px;
+        column-gap: 8px;
+        min-width: 0;
+    }
+    .header-right { margin-left: auto; }
+
+    /* F5/Enter/F9 hints mean nothing on a touch device. */
+    .shortcut-hints,
+    .version-tag,
+    .system-clock { display: none !important; }
+
+    .app-title { font-size: 13px !important; }
+    .logo-icon { font-size: 14px; }
+
+    /* Currency tabs: one swipeable row rather than five wrapped buttons. */
+    .currency-toggle-group {
+        order: 10;
+        flex: 1 0 100%;
+        display: flex !important;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        gap: 4px;
+        padding-bottom: 2px;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    .currency-toggle-group::-webkit-scrollbar { display: none; }
+    .currency-toggle-btn {
+        flex: 0 0 auto;
+        padding: 7px 10px !important;
+        font-size: 11px !important;
+        min-height: 34px;
+    }
+
+    /* ---------- one column, in reading order ------------------------------ */
+    .terminal-grid {
+        grid-template-columns: 1fr !important;
+        gap: 10px;
+        padding: 8px 10px 0 10px;
+    }
+    /* What a trader wants first on a phone is the price, then the inputs that
+       produced it. The quote table is reference material and goes last. */
+    /* Grid items default to min-width:auto, so a wide table would stretch the
+       single column past the viewport instead of scrolling inside it. */
+    .terminal-grid > * { min-width: 0; }
+    .panel-trade   { order: 1; }
+    .panel-results { order: 2; grid-column: auto !important; }
+    .panel-market  { order: 3; }
+
+    .panel { border-radius: 8px; }
+    .panel-header { padding: 8px 10px; flex-wrap: wrap; row-gap: 6px; }
+    .panel-title h2,
+    .panel-title h3 { font-size: 12.5px; line-height: 1.3; }
+
+    .panel-paste-schedule,
+    .panel-waterfall { margin: 0 10px 10px 10px; }
+
+    /* These two panel headers pack a title, a toolbar and a tab strip into one
+       non-wrapping flex row. At 390px the tail of it - including the Calculate
+       button - sat off-screen with nothing to scroll it back. */
+    .schedule-toolbar,
+    .schedule-tab-controls {
+        flex-wrap: wrap;
+        margin-right: 0;
+        row-gap: 6px;
+        max-width: 100%;
+    }
+    .schedule-toolbar .btn-tb,
+    .schedule-tab-controls .tab-btn { flex: 0 1 auto; }
+    /* A column legend that is wider than the panel; the table headers say the same. */
+    .hint-inline { display: none; }
+
+    /* The two leg cards are a hardcoded two-column grid in the markup, so this
+       needs !important to beat the inline style. Side by side they gave each
+       leg 175px and pushed its column labels off-screen. */
+    #rc-paste-grid-container { grid-template-columns: 1fr !important; gap: 12px !important; }
+    #rc-paste-grid-container > div { padding: 10px 12px !important; }
+
+    /* The column guide is a 16ch grid deliberately lined up with the textarea's
+       16ch tab stops, so it cannot be reflowed without the paste stopping to
+       line up. Scroll the card instead, and pin both to the same width so the
+       guide stays over the column it labels. */
+    #rc-paste-grid-container > div { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    #rc-paste-grid-container > div > div[style*="16ch"],
+    #rc-paste-input-leg1,
+    #rc-paste-input-leg2 { min-width: 72ch; }
+
+    /* ---------- tables: scroll sideways rather than being cut off --------- */
+    .table-wrapper {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    #quote-table,
+    .data-table { font-size: 11px; }
+    #quote-table th,
+    #quote-table td { padding: 6px 8px; white-space: nowrap; }
+
+    /* The RIC is how the desk names an instrument; on a phone the tenor and the
+       price are what is being read, and the RIC costs a third of the width. */
+    #quote-table th:nth-child(2),
+    #quote-table td:nth-child(2) { display: none; }
+
+    /* ---------- forms: full width and thumb-sized ------------------------- */
+    /* Two phases side by side need real width; a pair of short selects does not.
+       Stacking .param-row-2 as well turned the leg conventions into four screens
+       of scrolling for no gain. */
+    .dual-phase-container {
+        grid-template-columns: 1fr !important;
+        display: grid !important;
+        gap: 8px;
+    }
+    .param-row-2 { gap: 8px; }
+    input, select, textarea { font-size: 16px; }   /* iOS 가 이보다 작으면 탭할 때 확대한다 */
+    .param-select,
+    .input-large,
+    input[type="number"],
+    input[type="text"],
+    input[type="date"] { min-height: 40px; }
+    .tenor-chip,
+    .btn-tb,
+    .btn-leg-struct-toggle { min-height: 36px; }
+
+    .tenor-chips { grid-template-columns: repeat(4, 1fr) !important; }
+    .quick-stats-strip { flex-wrap: wrap; }
+
+    /* ---------- results: stack the three headline numbers ----------------- */
+    .result-hero-cards { grid-template-columns: 1fr !important; }
+
+    /* ---------- term sheet popup: full screen ----------------------------- */
+    .ts-modal-backdrop { padding: 0; }
+    .ts-modal {
+        width: 100%;
+        max-width: 100%;
+        height: 100%;
+        max-height: 100%;
+        border-radius: 0;
+    }
+    .ts-groups { grid-template-columns: 1fr !important; }
+    .ts-sched-wrap { max-height: 45vh; }
+
+    /* ---------- action bar ------------------------------------------------
+       The trade panel already has Reload / Calculate / One-Shot buttons, but in
+       a single column they sit below the notional, the tenors, the dates and
+       both legs' conventions - a long scroll away from whatever the trader just
+       changed. This puts the same three actions within thumb reach.           */
+    .mobile-actions {
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        z-index: 80;
+        display: flex;
+        gap: 6px;
+        padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)) 10px;
+        background: rgba(255, 255, 255, .97);
+        border-top: 1px solid #cbd5e1;
+        box-shadow: 0 -2px 10px rgba(15, 23, 42, .08);
+    }
+    .mobile-actions button {
+        flex: 1;
+        min-height: 44px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 800;
+        border: 1.5px solid #cbd5e1;
+        background: #fff;
+        color: #1e293b;
+    }
+    .mobile-actions button.primary {
+        background: #1d4ed8; border-color: #1d4ed8; color: #fff;
+    }
+    .mobile-actions button:active { transform: translateY(1px); }
+
+    /* Keep the bar from covering the last row of whatever is scrolled to. */
+    body { padding-bottom: 76px; }
+}
+
+/* --------------------------------------------------------------------------
+   Very small phones (iPhone SE and the like, 320px). Six pixels of overflow is
+   still a horizontal scrollbar on every screen of the app.
+   -------------------------------------------------------------------------- */
+@media (max-width: 360px) {
+    .app-header { padding: 6px; }
+    .header-left,
+    .market-source { max-width: 100%; }
+    .market-source { flex-wrap: wrap; row-gap: 4px; }
+    .market-source .btn-xs-connect { padding: 4px 6px; font-size: 10px; }
+    .app-title { font-size: 12px !important; }
+    #schedule-title-text,
+    #paste-schedule-title-text {
+        font-size: 12px;
+        overflow-wrap: anywhere;
+        min-width: 0;
+    }
+    .waterfall-toggle .header-left,
+    .paste-schedule-header .header-left { min-width: 0; flex-wrap: wrap; }
+    .panel-paste-schedule,
+    .panel-waterfall { margin: 0 6px 10px 6px; }
+    .terminal-grid { padding: 8px 6px 0 6px; }
+}

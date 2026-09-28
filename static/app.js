@@ -5254,38 +5254,51 @@ document.addEventListener("DOMContentLoaded", () => {
     // 중계는 데스크가 30초마다 보낸다. 그보다 촘촘히 확인할 이유는 없다.
     setInterval(pollRelay, 20000);
 
+    // The three desk actions, named once. A phone has no F5/F9 and no Enter key
+    // worth pressing, so the mobile bar drives the same functions the hotkeys do -
+    // if these were duplicated, the FWD branch and the term sheet gate below would
+    // only be enforced on one of the two paths.
+    function doReload() {
+        if (state.currency === "USD_FWD") fetchFwdMarketSnapshot(true);
+        else loadMarketSnapshot(true);
+    }
+
+    function doPrice() {
+        if (state.currency === "USD_FWD") calculateFwdPricing();
+        else calculatePricing();
+    }
+
+    function doReloadAndPrice() {
+        if (isAwaitingTermsheetReview()) {
+            showToast("Term Sheet 조건을 검토하고 확인을 누르세요", "warning");
+            if (ts.confirm && !ts.confirm.disabled) ts.confirm.focus();
+            return;
+        }
+        if (state.currency === "USD_FWD") reloadAndPriceFwd();
+        else reloadAndPrice();
+    }
+
     // Hotkeys: F5 (Reload), Enter (Price), F9 (Reload & Price)
     document.addEventListener("keydown", (e) => {
         if (e.key === "F9") {
             e.preventDefault();
-            if (isAwaitingTermsheetReview()) {
-                showToast("Term Sheet 조건을 검토하고 확인을 누르세요", "warning");
-                if (ts.confirm && !ts.confirm.disabled) ts.confirm.focus();
-                return;
-            }
-            if (state.currency === "USD_FWD") {
-                reloadAndPriceFwd();
-            } else {
-                reloadAndPrice();
-            }
+            doReloadAndPrice();
         } else if (e.key === "F5") {
             e.preventDefault();
-            if (state.currency === "USD_FWD") {
-                fetchFwdMarketSnapshot(true);
-            } else {
-                loadMarketSnapshot(true);
-            }
+            doReload();
         } else if (e.key === "Enter") {
             const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : "";
             if (tag !== "textarea") {
                 e.preventDefault();
-                if (state.currency === "USD_FWD") {
-                    calculateFwdPricing();
-                } else {
-                    calculatePricing();
-                }
+                doPrice();
             }
         }
+    });
+
+    [["m-btn-reload", doReload], ["m-btn-price", doPrice],
+     ["m-btn-oneshot", doReloadAndPrice]].forEach(([id, fn]) => {
+        const b = document.getElementById(id);
+        if (b) b.addEventListener("click", fn);
     });
 
     // Initial Startup Load.
