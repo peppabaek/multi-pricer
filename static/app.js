@@ -2366,7 +2366,11 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (base) {
             base.hidden = Boolean(isLive) || relaying;
-            base.title = "실시간 피드에 연결되지 않아 기준호가로 계산 중입니다";
+            // 여기서 끝내면 트레이더는 무엇을 해야 할지 알 수 없다. 원인이
+            // 데스크 중계가 멈춘 것이라면 그렇게 말해준다.
+            base.title = "실시간 피드 없음 — 기준호가로 계산 중입니다. "
+                       + "데스크 PC 에서 중계(tools/desk_relay.py)를 실행하면 "
+                       + "실시간 호가가 들어옵니다";
         }
     }
 

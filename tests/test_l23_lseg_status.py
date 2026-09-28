@@ -118,6 +118,42 @@ def t_5():
         raise AssertionError("조회 함수가 열기 동작에 연결되지 않음")
 
 
+@case("L23-6", "호스팅 인스턴스는 고칠 수 없는 것을 고치라고 하지 않는다")
+def t_6():
+    # 클라우드에는 Workspace 가 있을 수 없다. 거기서 "Workspace 미실행" 은
+    # 실제로 해야 할 일 - 데스크 중계를 띄우는 것 - 을 가린다. 화면이 BASE 만
+    # 보여주고 원인을 말하지 않아, 중계가 안 도는 것을 알아채는 데 시간이 걸렸다.
+    from server import relay
+    saved_env = os.environ.get("PRICER_NO_LOCAL_FEED")
+    os.environ["PRICER_NO_LOCAL_FEED"] = "1"
+    relay.clear("USD")
+    try:
+        v = status()["verdict"]
+        if "desk_relay" not in v:
+            raise AssertionError(f"무엇을 해야 하는지 말하지 않음: {v!r}")
+        if "Workspace 미실행" in v:
+            raise AssertionError(f"클라우드에서 고칠 수 없는 것을 지시: {v!r}")
+    finally:
+        if saved_env is None:
+            os.environ.pop("PRICER_NO_LOCAL_FEED", None)
+        else:
+            os.environ["PRICER_NO_LOCAL_FEED"] = saved_env
+
+
+@case("L23-7", "중계가 들어오면 그 상태를 그대로 보여준다")
+def t_7():
+    import time as _t
+    from server import relay
+    relay.clear("USD")
+    client.post("/api/quotes/push", json={
+        "currency": "USD", "quotes": [{"tenor": "5Y", "mid": 4.5}],
+        "origin": "desk-x", "source_epoch_ms": _t.time() * 1000})
+    v = status()["verdict"]
+    if "데스크 중계" not in v or "desk-x" not in v:
+        raise AssertionError(f"중계 상태가 반영되지 않음: {v!r}")
+    relay.clear("USD")
+
+
 if __name__ == "__main__":
     print("\n=== L23 LSEG 연동 상태 표시 ===")
     sys.exit(1 if run_all("L23") else 0)

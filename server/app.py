@@ -334,7 +334,18 @@ def lseg_status():
     quotes = snap.get("quotes") or []
     live = bool(snap.get("is_live_connected"))
 
-    if not configured:
+    # 호스팅 인스턴스에는 Workspace 가 있을 수 없다. 거기서 "Workspace 미실행" 은
+    # 고칠 수 없는 것을 고치라는 말이라, 실제로 해야 할 일을 가린다 - 데스크
+    # 중계를 띄우는 것이다.
+    from server import relay as _relay
+    from server.access import is_hosted
+    rly = _relay.status("USD")
+    if rly.get("active"):
+        verdict = _relay.describe("USD")
+    elif is_hosted() or os.environ.get("PRICER_NO_LOCAL_FEED"):
+        verdict = ("이 서버에는 Workspace 가 없습니다 — 데스크 PC 에서 "
+                   "tools/desk_relay.py 를 실행하면 호가가 들어옵니다")
+    elif not configured:
         verdict = "App Key 미설정 — Workspace 에서 APPKEY 로 발급해 입력하세요"
     elif not workspace_listening(port):
         verdict = f"App Key 있음 · Workspace 미실행 (127.0.0.1:{port} 응답 없음)"
@@ -355,6 +366,8 @@ def lseg_status():
         "last_update": snap.get("timestamp"),
         "feed_source": snap.get("source"),
         "verdict": verdict,
+        "relay": rly,
+        "hosted": bool(is_hosted() or os.environ.get("PRICER_NO_LOCAL_FEED")),
     }}
 
 
