@@ -608,8 +608,37 @@ def _relay_feed(currency: str):
         _RELAY_FEEDS = {
             "USD": tradition_feed, "KRW": krw_feed,
             "KOFR": kofr_feed, "CRS": crs_feed,
+            "FWD": kmbc_fwd_feed,
         }
     return _RELAY_FEEDS.get((currency or "USD").upper())
+
+
+def _apply_quote(feed, tenor: str, mid: float, bid=None, ask=None) -> bool:
+    """
+    한 건을 피드에 반영하고, 실제로 반영됐는지 돌려준다.
+
+    피드마다 갱신 메서드의 이름과 인자 수가 다르다. tradition_feed 는
+    (tenor, mid, bid, ask), KRW/KOFR/FWD 는 (tenor, mid) 뿐이고, CRS 는 이름부터
+    update_quote_manually 다. 중계는 이 차이를 알 필요가 없으므로 여기서 흡수한다 -
+    맞추지 않았을 때 KOFR 가 매 주기마다 19건씩 실패했다.
+
+    모르는 테너는 대부분의 피드가 조용히 무시하고 아무것도 돌려주지 않는다. 그걸
+    성공으로 세면 '31건 반영'이라 보고하면서 실제로는 한 건도 안 바뀔 수 있다.
+    """
+    fn = getattr(feed, "update_quote", None) or getattr(feed, "update_quote_manually", None)
+    if fn is None:
+        raise AttributeError(f"{type(feed).__name__} 에 호가 갱신 메서드가 없습니다")
+
+    known = getattr(feed, "quotes", None)
+    if isinstance(known, dict) and known:
+        if tenor.strip().upper() not in {str(k).strip().upper() for k in known}:
+            return False
+
+    try:
+        result = fn(tenor, mid, bid, ask)
+    except TypeError:
+        result = fn(tenor, mid)
+    return True if result is None else bool(result)
 
 
 @app.post("/api/quotes/push")
@@ -635,10 +664,20 @@ def push_relayed_quotes(req: RelayPushRequest):
             skipped.append(tenor or "?")
             continue
         try:
-            feed.update_quote(tenor, float(mid), q.get("bid"), q.get("ask"))
-            applied += 1
+            if _apply_quote(feed, tenor, float(mid), q.get("bid"), q.get("ask")):
+                applied += 1
+            else:
+                skipped.append(f"{tenor}(피드가 모르는 테너)")
         except Exception as e:
-            skipped.append(f"{tenor}({e})")
+            skipped.append(f"{tenor}({type(e).__name__}: {e})")
+
+    if not applied:
+        # 한 건도 반영하지 못했는데 중계를 기록하면, 대시보드가 '데스크 중계 중'
+        # 이라고 표시하면서 실제로는 기준호가를 보여준다. 아무것도 안 온 것보다
+        # 나쁘다 - 트레이더가 연결됐다고 믿는다.
+        raise HTTPException(
+            status_code=422,
+            detail=f"{req.currency} 호가를 한 건도 반영하지 못했습니다: {skipped[:3]}")
 
     st = relay.record(req.currency, req.origin or "desk",
                       req.source_timestamp, applied,

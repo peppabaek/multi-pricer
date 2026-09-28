@@ -224,6 +224,53 @@ def t_13():
         raise AssertionError("에이전트가 벽시계 문자열만 보낸다 — 시간대가 어긋난다")
 
 
+@case("L24-14", "다섯 통화 모두 중계가 반영된다")
+def t_14():
+    # 피드마다 갱신 메서드의 이름과 인자 수가 달랐다. USD 만 (tenor, mid, bid, ask)
+    # 를 받고 KRW/KOFR/FWD 는 (tenor, mid), CRS 는 이름이 update_quote_manually 다.
+    # 맞추지 않았을 때 USD 만 들어오고 나머지 넷은 매 주기마다 전부 실패했다.
+    import time as _t
+    for cur, tenor in (("USD", "5Y"), ("KRW", "5Y"), ("KOFR", "5Y"),
+                       ("CRS", "5Y"), ("FWD", "1M")):
+        relay.clear(cur)
+        r = client.post("/api/quotes/push", json={
+            "currency": cur, "origin": "desk-test",
+            "source_epoch_ms": _t.time() * 1000,
+            "quotes": [{"tenor": tenor, "mid": 4.0, "bid": 3.99, "ask": 4.01}]})
+        if r.status_code != 200:
+            raise AssertionError(f"{cur}: HTTP {r.status_code} {r.text[:150]}")
+        if r.json()["data"]["applied"] != 1:
+            raise AssertionError(f"{cur}: 반영 {r.json()['data']}")
+
+
+@case("L24-15", "한 건도 반영 못 하면 중계중이라고 기록하지 않는다")
+def t_15():
+    # 0건인데 기록하면 대시보드가 '데스크 중계 중' 이라고 표시하면서 실제로는
+    # 기준호가를 보여준다. 아무것도 안 온 것보다 나쁘다 - 연결됐다고 믿게 된다.
+    import time as _t
+    relay.clear("USD")
+    r = client.post("/api/quotes/push", json={
+        "currency": "USD", "origin": "desk-bad",
+        "source_epoch_ms": _t.time() * 1000,
+        "quotes": [{"tenor": "존재하지않는테너", "mid": 4.0}]})
+    if r.status_code == 200 and r.json()["data"]["applied"] == 0:
+        raise AssertionError("0건 반영을 성공으로 처리")
+    if relay.status("USD").get("active"):
+        raise AssertionError("아무것도 반영하지 못했는데 중계중으로 기록")
+
+
+@case("L24-16", "에이전트가 다섯 통화를 모두 대상으로 한다")
+def t_16():
+    with io.open(os.path.join(ROOT, "tools", "desk_relay.py"), encoding="utf-8") as f:
+        src = f.read()
+    for cur in ("USD", "KRW", "KOFR", "CRS", "FWD"):
+        if f'"{cur}"' not in src:
+            raise AssertionError(f"에이전트에 {cur} 경로가 없음")
+    # KRW 는 호가가 응답 최상위에 있어, 메타데이터만 보면 '호가 없음' 이 된다.
+    if 'payload.get("quotes")' not in src:
+        raise AssertionError("KRW 처럼 호가가 최상위에 있는 응답을 읽지 못한다")
+
+
 if __name__ == "__main__":
     print("\n=== L24 데스크 → 클라우드 중계 ===")
     sys.exit(1 if run_all("L24") else 0)

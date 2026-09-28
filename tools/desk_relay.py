@@ -39,9 +39,11 @@ for _s in (sys.stdout, sys.stderr):
 # 로컬 프라이서의 통화별 스냅샷 경로와, 그 응답에서 호가가 들어 있는 키.
 SOURCES = {
     "USD":  ("/api/market-snapshot", "data"),
+    # KRW 는 메타데이터가 snapshot_info 에, 호가는 최상위에 있다.
     "KRW":  ("/api/krw/market-snapshot", "snapshot_info"),
     "KOFR": ("/api/kofr/market-snapshot", "data"),
     "CRS":  ("/api/crs/market-snapshot", "data"),
+    "FWD":  ("/api/fwd/market-snapshot", "data"),
 }
 
 
@@ -64,7 +66,9 @@ def read_local(local, currency):
     sep = "&" if "?" in path else "?"
     payload = call(f"{local}{path}{sep}reload=true")
     body = payload.get("data") or payload.get(key) or {}
-    quotes = body.get("quotes") or []
+    # 응답 모양이 통화마다 다르다. KRW 는 호가가 최상위에 있어, 메타데이터만 보고
+    # "호가 없음" 으로 건너뛰고 있었다.
+    quotes = body.get("quotes") or payload.get("quotes") or []
     return body, [
         {"tenor": q.get("tenor"), "mid": q.get("mid"),
          "bid": q.get("bid"), "ask": q.get("ask")}
@@ -125,7 +129,7 @@ def main():
     ap.add_argument("--target", required=True, help="배포된 프라이서 주소")
     ap.add_argument("--user", default=os.environ.get("PRICER_AUTH_USER", ""))
     ap.add_argument("--interval", type=int, default=30, help="전송 주기(초)")
-    ap.add_argument("--currencies", default="USD,KRW,KOFR,CRS")
+    ap.add_argument("--currencies", default="USD,KRW,KOFR,CRS,FWD")
     ap.add_argument("--origin", default=os.environ.get("COMPUTERNAME", "desk"))
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
