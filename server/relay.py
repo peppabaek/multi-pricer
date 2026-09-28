@@ -114,6 +114,9 @@ def status(currency: str) -> Dict[str, Any]:
             "received_at": row["received_at"],
             "quote_count": row["quote_count"],
             "age_seconds": round(age, 1),
+            # 화면이 스스로 초를 셀 수 있게 절대 시각을 함께 준다. 서버 응답의
+            # age 만 쓰면 페이지를 다시 불러올 때까지 배지가 그 값에 멈춘다.
+            "source_epoch_ms": int(row["_source_epoch"] * 1000),
             "clock_skewed": skewed,
             "stale": skewed or age > limit,
             "stale_after_seconds": limit,

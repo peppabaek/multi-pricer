@@ -2342,7 +2342,44 @@ document.addEventListener("DOMContentLoaded", () => {
                `padding:2px 6px;border-radius:4px;border:1px solid ${border};margin-left:6px;">${text}</span>`;
     }
 
-    function setFeedBadge(isLive, relayState) {
+    // 마지막으로 받은 중계 상태. 배지가 매초 스스로 나이를 세려면 서버가 준
+    // age 가 아니라 절대 시각이 필요하다.
+    let lastRelay = null;
+
+    function tickFeedBadge() {
+        // 한 번 그리고 마는 배지는 데스크가 멈춰도 그대로 남는다. 매초 다시 센다.
+        if (!lastRelay || !lastRelay.active) return;
+        if (!lastRelay.source_epoch_ms) return;
+        const age = Math.max(0, (Date.now() - lastRelay.source_epoch_ms) / 1000);
+        const limit = lastRelay.stale_after_seconds || 90;
+        setFeedBadge(lastRelay._isLive, Object.assign({}, lastRelay, {
+            age_seconds: age,
+            stale: lastRelay.clock_skewed || age > limit,
+        }), true);
+    }
+
+    async function pollRelay() {
+        // 트레이더가 아무것도 누르지 않아도 새 중계를 집어온다. 가벼운 조회라
+        // 화면 전체를 다시 그리지 않고, 호가가 바뀌었을 때만 스냅샷을 다시 받는다.
+        try {
+            const r = await fetch("/api/quotes/relay-status");
+            if (!r.ok) return;
+            const all = (await r.json()).data || {};
+            const cur = relayKeyForCurrency(state.currency);
+            const st = all[cur];
+            if (!st || !st.active) return;
+            const moved = !lastRelay || st.source_epoch_ms !== lastRelay.source_epoch_ms;
+            setFeedBadge(lastRelay ? lastRelay._isLive : false, st);
+            if (moved) await loadMarketSnapshot();
+        } catch (e) { /* 폴링 실패가 화면을 망가뜨리지는 않는다 */ }
+    }
+
+    function relayKeyForCurrency(cur) {
+        return ({ "USD": "USD", "KRW": "KRW", "KRW_KOFR": "KOFR",
+                  "KRW_CRS": "CRS", "USD_FWD": "FWD" })[cur] || "USD";
+    }
+
+    function setFeedBadge(isLive, relayState, fromTick) {
         // 세 가지는 서로 다른 것이다. LIVE 는 이 서버가 LSEG 에 직접 붙은 것,
         // RELAY 는 데스크 PC 가 보내준 호가, BASE 는 아무 피드도 없는 기준호가.
         // RELAY 를 LIVE 로 보이게 하면 데스크가 꺼진 뒤에도 실시간처럼 읽힌다.
@@ -2350,6 +2387,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const base = document.getElementById("base-quote-badge");
         const rly = document.getElementById("relay-badge");
         const relaying = Boolean(relayState && relayState.active);
+        if (!fromTick && relayState) {
+            lastRelay = Object.assign({}, relayState, { _isLive: isLive });
+        }
 
         if (live) live.hidden = !isLive;
         if (rly) {
@@ -2359,6 +2399,17 @@ document.addEventListener("DOMContentLoaded", () => {
                 const when = age < 120 ? `${age}s` : `${Math.round(age / 60)}m`;
                 rly.textContent = `● RELAY (${when})`;
                 rly.classList.toggle("stale", Boolean(relayState.stale));
+                rly.style.cursor = "pointer";
+                if (!rly.dataset.wired) {
+                    rly.dataset.wired = "1";
+                    // 기다리지 않고 지금 확인하고 싶을 때. 데스크에 호가를
+                    // 달라고 할 수는 없으므로, 데스크가 마지막으로 보낸 것을
+                    // 다시 가져온다.
+                    rly.addEventListener("click", () => {
+                        showToast("중계 상태를 다시 확인합니다…", "info");
+                        pollRelay();
+                    });
+                }
                 rly.title = relayState.stale
                     ? `데스크 중계 호가가 ${when} 지났습니다 — 데스크 PC 연결을 확인하세요`
                     : `데스크 PC(${relayState.origin || "-"}) 중계 · 원본 ${relayState.source_time || "-"}`;
@@ -5197,7 +5248,11 @@ document.addEventListener("DOMContentLoaded", () => {
             elements.systemClock.textContent = new Date().toLocaleTimeString();
         }
         refreshStaleness();
+        tickFeedBadge();
     }, 1000);
+
+    // 중계는 데스크가 30초마다 보낸다. 그보다 촘촘히 확인할 이유는 없다.
+    setInterval(pollRelay, 20000);
 
     // Hotkeys: F5 (Reload), Enter (Price), F9 (Reload & Price)
     document.addEventListener("keydown", (e) => {
