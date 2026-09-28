@@ -195,14 +195,22 @@ def main():
             else:
                 bad(f"중계했는데 RELAY 배지가 없음: {names or '배지 없음'}")
 
+            # 비교 기준은 중계가 실제로 보낸 값이어야 한다. 중계 전에 읽어두면
+            # 그 사이 시세가 움직여 불일치로 오보한다 - 실제로 한 번 그랬고,
+            # 그 다음 판은 시세가 가만히 있어 통과했다. 둘 다 검사가 아니다.
+            # reload 없이 읽으면 중계가 방금 보낸 그 스냅샷이 그대로 나온다.
+            _, desk_body = get(f"{desk}/api/market-snapshot")
+            sent = {q["tenor"]: q["mid"]
+                    for q in (desk_body.get("data") or {}).get("quotes", [])}
+            want5 = sent.get("5Y", ref.get("5Y"))
+
             code, body = get(f"{cloud_url}/api/market-snapshot", auth)
             d = body.get("data") or {}
             got5 = {q["tenor"]: q["mid"] for q in d.get("quotes", [])}.get("5Y")
-            if got5 is not None and ref.get("5Y") is not None \
-                    and abs(got5 - ref["5Y"]) < 1e-9:
+            if got5 is not None and want5 is not None and abs(got5 - want5) < 1e-9:
                 ok(f"웹의 5Y 호가가 데스크와 일치: {got5}")
             else:
-                bad(f"호가 불일치 — 데스크 {ref.get('5Y')} vs 웹 {got5}")
+                bad(f"호가 불일치 — 데스크 {want5} vs 웹 {got5}")
 
             # 웹에서 실제로 가격이 나오는가
             page.keyboard.press("Enter")
@@ -216,9 +224,17 @@ def main():
                 bad("웹에서 프라이싱 결과가 나오지 않음")
 
             # ---------------- 시나리오 B ----------------
-            print(f"\n=== 시나리오 B: 데스크 PC 를 끈 뒤 ({STALE_AFTER}s 경과) ===")
-            print(f"  중계를 멈추고 {STALE_AFTER + 4}초 기다립니다…")
-            time.sleep(STALE_AFTER + 4)
+            # 기다릴 시간은 서버가 정한다. 로컬 대역은 20초로 띄우지만 배포본은
+            # 90초가 기본이라, 테스트가 자기 상수를 고집하면 아직 오래되지 않은
+            # 것을 결함으로 보고한다 - 실제로 그렇게 오보했다.
+            code, body = get(f"{cloud_url}/api/market-snapshot", auth)
+            st0 = (body.get("data") or {}).get("relay") or {}
+            limit = st0.get("stale_after_seconds", STALE_AFTER)
+            already = st0.get("age_seconds", 0)
+            wait = max(5, limit - already + 6)
+            print(f"\n=== 시나리오 B: 데스크 PC 를 끈 뒤 (서버 기준 {limit}s) ===")
+            print(f"  중계를 멈추고 {int(wait)}초 기다립니다…")
+            time.sleep(wait)
 
             page.reload(wait_until="load", timeout=180000)
             page.wait_for_timeout(5000)
