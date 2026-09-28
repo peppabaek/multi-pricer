@@ -114,7 +114,26 @@
 
     /* These two panel headers pack a title, a toolbar and a tab strip into one
        non-wrapping flex row. At 390px the tail of it - including the Calculate
-       button - sat off-screen with nothing to scroll it back. */
+       button - sat off-screen with nothing to scroll it back.
+
+       Wrapping the toolbars alone is not enough: the header itself has to wrap
+       too, or the three children stay on one line and the title overflows its
+       shrunken box straight underneath the buttons. Nothing is off-screen when
+       that happens, so a width check does not see it - it just renders as the
+       tab buttons printed on top of "Swap Cash Flow Schedule". */
+    .waterfall-header,
+    .paste-schedule-header {
+        flex-wrap: wrap;
+        align-items: flex-start;
+        row-gap: 8px;
+    }
+    .waterfall-header > .header-left,
+    .paste-schedule-header > .header-left {
+        flex: 1 1 100%;
+        min-width: 0;
+        flex-wrap: wrap;
+        row-gap: 4px;
+    }
     .schedule-toolbar,
     .schedule-tab-controls {
         flex-wrap: wrap;

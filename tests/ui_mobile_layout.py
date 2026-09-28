@@ -80,6 +80,36 @@ CLIPPED = """() => {
 }"""
 
 
+# 겹침은 넘침이 아니다. 폭 검사는 전부 통과하는데도, 줄바꿈된 툴바 버튼들이
+# "Swap Cash Flow Schedule" 제목 위에 그대로 인쇄된 적이 있다. 화면 밖으로
+# 나간 게 아니라 서로 포개진 것이라 폭으로는 잡히지 않았다.
+#
+# 그래서 눌러야 할 것들의 중심점을 실제로 히트테스트한다 - 그 자리에서 잡히는
+# 요소가 자기 자신(또는 자손)이 아니면, 트레이더 손가락에도 안 잡힌다.
+COVERED = """() => {
+  const vh = window.innerHeight, out = [];
+  const bar = document.getElementById('mobile-actions');
+  const barTop = bar && bar.offsetParent !== null
+      ? bar.getBoundingClientRect().top : Infinity;
+  document.querySelectorAll('button, h1, h2, h3, .tab-btn, .btn-tb').forEach(el => {
+    const r = el.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) return;
+    if (r.top < 0 || r.bottom > vh) return;          // 화면 안에 온전히 있는 것만
+    if (bar && bar.contains(el)) return;
+    if (r.bottom > barTop) return;
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const hit = document.elementFromPoint(cx, cy);
+    if (!hit) return;
+    if (el.contains(hit) || hit.contains(el)) return;
+    // 실행 막대가 위에 있는 건 정상이다 - 막대는 떠 있으라고 만든 것이고,
+    // 그 아래로 스크롤하면 나온다(아래 별도 검사). 그 외의 겹침만 보고한다.
+    if (bar && (bar === hit || bar.contains(hit))) return;
+    out.push(((el.id || el.className || el.tagName) + '').slice(0, 34)
+             + ' <- ' + ((hit.id || hit.className || hit.tagName) + '').slice(0, 34));
+  });
+  return out;
+}"""
+
 def col_count(page):
     css = page.evaluate(
         "() => getComputedStyle(document.querySelector('.terminal-grid')).gridTemplateColumns")
@@ -122,6 +152,21 @@ def check_phone(page, base):
         else:
             ok("호가표가 폭 안에 들어옴")
 
+    # 패널을 하나씩 화면에 올려가며 겹친 것이 없는지 본다.
+    covered = []
+    for sel in (".panel-trade", ".panel-results", ".panel-market",
+                ".panel-paste-schedule", ".panel-waterfall"):
+        page.evaluate(f"() => {{ const e = document.querySelector('{sel}');"
+                      f" if (e) e.scrollIntoView(); }}")
+        page.wait_for_timeout(400)
+        covered += [f"{sel}: {c}" for c in page.evaluate(COVERED)]
+    page.evaluate("() => window.scrollTo(0, 0)")
+    page.wait_for_timeout(300)
+    if covered:
+        bad(f"다른 요소에 가려진 버튼/제목 {len(covered)}건: {covered[:4]}")
+    else:
+        ok("겹쳐서 가려진 버튼·제목 없음")
+
     bar = page.locator("#mobile-actions")
     if not bar.count() or not bar.is_visible():
         bad("휴대폰에서 실행 막대가 없음 — 프라이싱을 실행할 방법이 없다")
@@ -147,6 +192,19 @@ def check_phone(page, base):
         bad("아래로 스크롤하면 실행 막대가 화면을 벗어남")
     else:
         ok("스크롤해도 실행 막대가 화면에 남음")
+
+    # 떠 있는 막대는 끝까지 스크롤했을 때 마지막 줄을 영구히 가리면 안 된다.
+    # body 의 아래 여백이 그 역할을 한다.
+    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    page.wait_for_timeout(600)
+    gap = page.evaluate(
+        "() => { const p = document.querySelector('.panel-waterfall');"
+        " const b = document.getElementById('mobile-actions');"
+        " return b.getBoundingClientRect().top - p.getBoundingClientRect().bottom; }")
+    if gap < 0:
+        bad(f"끝까지 스크롤해도 막대가 마지막 패널을 {abs(round(gap))}px 가림")
+    else:
+        ok(f"막대 아래로 내용이 숨지 않음 (여백 {round(gap)}px)")
 
     # 레이아웃만 맞고 버튼이 아무것도 하지 않으면 읽기 전용 화면이다.
     before = page.locator("#res-par-rate").inner_text()
