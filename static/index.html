@@ -11,6 +11,29 @@
     <link rel="stylesheet" href="styles.css?v=3.6">
     <link rel="stylesheet" href="terminal.css?v=1">
     <link rel="stylesheet" href="mobile.css?v=1">
+    <script>
+    /* 휴대폰에서 이 주소를 열면 휴대폰 화면으로 보낸다.
+
+       app.js 를 받기 전에, <head> 안에서 판단해야 한다. 페이지가 그려진 뒤에
+       옮기면 폰이 6,500줄을 먼저 내려받고 실행한 다음 버려지게 된다.
+
+       PC 화면을 일부러 보려는 경우가 있으므로 되돌아올 길을 남긴다:
+       /?view=pc 로 들어오면 그 선택을 기억하고 다시는 옮기지 않는다. */
+    (function () {
+        try {
+            var q = new URLSearchParams(location.search);
+            if (q.get("view") === "pc") {
+                localStorage.setItem("pricer_view", "pc");
+                return;
+            }
+            if (localStorage.getItem("pricer_view") === "pc") return;
+        } catch (e) { /* 저장이 막힌 브라우저에서도 이동은 되어야 한다 */ }
+        var narrow = Math.min(window.innerWidth || 9999,
+                              window.screen ? window.screen.width : 9999) <= 820;
+        if (narrow) location.replace("/m" + location.search);
+    })();
+    </script>
+
     <!-- SheetJS for Excel Schedule Template Download & Upload -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>

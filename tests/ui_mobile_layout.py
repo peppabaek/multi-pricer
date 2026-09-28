@@ -36,6 +36,10 @@ sys.path.insert(0, ROOT)
 PORT = 8129
 PHONE = {"width": 390, "height": 844}       # iPhone 14/15
 DESKTOP = {"width": 1680, "height": 1050}
+# /m 이 생긴 뒤 좁은 화면에서 / 는 휴대폰 전용 화면으로 넘어갑니다. 여기서 재는
+# 것은 그 화면이 아니라 PC 페이지 자체의 반응형 동작이므로, 넘어가지 않도록
+# PC 를 명시합니다(전용 화면은 ui_mobile_page.py 가 봅니다).
+PC_VIEW = "/?view=pc"
 
 fails = []
 
@@ -117,7 +121,7 @@ def col_count(page):
 
 
 def check_phone(page, base):
-    page.goto(base + "/", wait_until="load", timeout=120000)
+    page.goto(base + PC_VIEW, wait_until="load", timeout=120000)
     page.wait_for_timeout(4000)
 
     vw, doc = page.evaluate(
@@ -221,7 +225,7 @@ def check_phone(page, base):
 
 
 def check_desktop(page, base):
-    page.goto(base + "/", wait_until="load", timeout=120000)
+    page.goto(base + PC_VIEW, wait_until="load", timeout=120000)
     page.wait_for_timeout(4000)
 
     vw, doc = page.evaluate(
@@ -267,7 +271,7 @@ def sweep(browser, base):
                         (1024, 768, "iPad 가로"), (1280, 800, "노트북"),
                         (1680, 1050, "데스크")]:
         pg = browser.new_page(viewport={"width": w, "height": h})
-        pg.goto(base + "/", wait_until="load", timeout=120000)
+        pg.goto(base + PC_VIEW, wait_until="load", timeout=120000)
         pg.wait_for_timeout(2500)
         vw, doc = pg.evaluate(
             "() => [document.documentElement.clientWidth, document.documentElement.scrollWidth]")
@@ -288,7 +292,7 @@ def check_modal(page, base):
     데스크톱용 중앙 카드 크기 그대로면 390px 안에서 거래조건 표와 확인 버튼이
     동시에 들어가지 않는다 — 검토하고 누르라는 창인데.
     """
-    page.goto(base + "/", wait_until="load", timeout=120000)
+    page.goto(base + PC_VIEW, wait_until="load", timeout=120000)
     page.wait_for_timeout(3000)
     page.evaluate("() => { document.getElementById('ts-modal-backdrop').style.display = 'flex'; }")
     page.wait_for_timeout(400)

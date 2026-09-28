@@ -1781,20 +1781,41 @@ def _asset_stamp(name: str) -> str:
         return "0"
 
 
-def _stamped_index() -> str:
-    with open(os.path.join(static_dir, "index.html"), encoding="utf-8") as fh:
+def _stamped_page(name: str) -> str:
+    with open(os.path.join(static_dir, name), encoding="utf-8") as fh:
         html = fh.read()
     return _ASSET_REF.sub(
         lambda m: f'{m.group("attr")}="{m.group("file")}?v={_asset_stamp(m.group("file"))}"',
         html)
 
 
+def _page_response(name: str) -> Response:
+    # no-store on the page itself: it is small, and it is what carries the stamps.
+    return Response(_stamped_page(name), media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-store"})
+
+
 @app.get("/", include_in_schema=False)
 @app.get("/index.html", include_in_schema=False)
 async def dashboard():
-    # no-store on the page itself: it is small, and it is what carries the stamps.
-    return Response(_stamped_index(), media_type="text/html; charset=utf-8",
-                    headers={"Cache-Control": "no-store"})
+    return _page_response("index.html")
+
+
+@app.get("/m", include_in_schema=False)
+@app.get("/m/", include_in_schema=False)
+async def mobile_dashboard():
+    """
+    The phone build: the same pricing API, a deliberately smaller screen.
+
+    A separate page rather than the desktop one with things hidden. index.html plus
+    app.js is 6,500 lines a phone would download and run in full before showing a
+    number it mostly cannot fit anyway, and the two would then have to be kept from
+    breaking each other on every change.
+
+    It is not exempt from the access gate - the middleware covers every path except
+    /healthz, so this is closed on a hosted deployment exactly as / is.
+    """
+    return _page_response("m.html")
 
 
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
