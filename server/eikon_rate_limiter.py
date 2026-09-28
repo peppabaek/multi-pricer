@@ -31,7 +31,12 @@ def workspace_listening(port: int = 9000, timeout: float = 0.35) -> bool:
     35ms check first keeps startup quiet and quick, and - on a host, where there is
     no desktop at all - avoids the attempt entirely.
     """
+    import os
     import socket
+    # 호스팅 환경처럼 Workspace 가 있을 수 없는 곳에서는 탐지 자체를 생략한다.
+    # 데스크 중계만 받는 인스턴스를 그대로 재현할 때도 쓴다.
+    if os.environ.get("PRICER_NO_LOCAL_FEED", "").strip().lower() in ("1", "true", "yes"):
+        return False
     try:
         with socket.socket() as sk:
             sk.settimeout(timeout)
