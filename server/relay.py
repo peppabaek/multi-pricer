@@ -34,26 +34,59 @@ def stale_after() -> int:
 
 
 def record(currency: str, origin: str, source_timestamp: Optional[str],
-           quote_count: int) -> Dict[str, Any]:
-    """중계가 들어왔음을 기록한다. 호가 자체는 기존 피드에 그대로 반영된다."""
+           quote_count: int, source_epoch_ms: Optional[float] = None) -> Dict[str, Any]:
+    """
+    중계가 들어왔음을 기록한다. 호가 자체는 기존 피드에 그대로 반영된다.
+
+    나이는 **절대 시각**으로 센다. 데스크는 서울, 서버는 UTC 에서 도는 것이
+    보통이라, 벽시계 문자열을 그대로 빼면 9시간이 어긋난다. 실제 배포에서
+    원본 시각이 9시간 미래로 계산되어 나이가 영원히 0 이 되었고, 끊긴 호가가
+    계속 최신으로 보였다.
+    """
     now = datetime.datetime.now()
-    parsed = None
-    if source_timestamp:
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
-            try:
-                parsed = datetime.datetime.strptime(source_timestamp[:19], fmt)
-                break
-            except ValueError:
-                continue
+    now_epoch = now.timestamp()
+
+    epoch = None
+    if source_epoch_ms:
+        try:
+            epoch = float(source_epoch_ms) / 1000.0
+        except (TypeError, ValueError):
+            epoch = None
+
+    # epoch 이 없을 때만 문자열을 쓴다. 오프셋이 붙어 있으면 그대로 신뢰하고,
+    # 없으면 서버 시간대로 읽을 수밖에 없다 - 그 사실을 감추지 않는다.
+    naive_string = False
+    if epoch is None and source_timestamp:
+        text = source_timestamp.strip()
+        try:
+            dt = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                naive_string = True
+            epoch = dt.timestamp()
+        except ValueError:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    epoch = datetime.datetime.strptime(text[:19], fmt).timestamp()
+                    naive_string = True
+                    break
+                except ValueError:
+                    continue
+
+    supplied = epoch is not None
+    if epoch is None:
+        epoch = now_epoch
+
     with _lock:
         _state[currency.upper()] = {
             "origin": origin or "desk",
-            # 데스크 PC 가 LSEG 에서 실제로 받은 시각. 없으면 도착 시각으로 대신하되
-            # 그 사실을 감추지 않는다.
-            "source_time": (parsed or now).strftime("%Y-%m-%d %H:%M:%S"),
-            "source_time_supplied": parsed is not None,
+            "source_time": datetime.datetime.fromtimestamp(epoch).strftime(
+                "%Y-%m-%d %H:%M:%S"),
+            "source_time_supplied": supplied,
+            # 벽시계 문자열만 받은 경우, 데스크와 서버의 시간대가 다르면 나이가
+            # 어긋난다. 화면에서 이를 구분할 수 있어야 한다.
+            "source_time_naive": naive_string,
             "received_at": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "_source_epoch": (parsed or now).timestamp(),
+            "_source_epoch": epoch,
             "quote_count": quote_count,
         }
     return status(currency)
@@ -65,17 +98,24 @@ def status(currency: str) -> Dict[str, Any]:
         row = _state.get(currency.upper())
         if not row:
             return {"active": False}
-        age = max(0.0, datetime.datetime.now().timestamp() - row["_source_epoch"])
+        raw_age = datetime.datetime.now().timestamp() - row["_source_epoch"]
         limit = stale_after()
+        # 미래 시각은 시계가 어긋났다는 뜻이다. 0 으로 깎아 '방금'으로 보이게 하면
+        # 끊긴 중계가 영원히 최신이 된다 - 실제 배포에서 그렇게 됐다. 모를 때는
+        # 신선하다고 하지 않는다.
+        skewed = raw_age < -5
+        age = max(0.0, raw_age)
         return {
             "active": True,
             "origin": row["origin"],
             "source_time": row["source_time"],
             "source_time_supplied": row["source_time_supplied"],
+            "source_time_naive": row.get("source_time_naive", False),
             "received_at": row["received_at"],
             "quote_count": row["quote_count"],
             "age_seconds": round(age, 1),
-            "stale": age > limit,
+            "clock_skewed": skewed,
+            "stale": skewed or age > limit,
             "stale_after_seconds": limit,
         }
 
@@ -99,6 +139,9 @@ def describe(currency: str) -> str:
     age = st["age_seconds"]
     when = f"{int(age)}초 전" if age < 120 else f"{int(age // 60)}분 전"
     head = f"데스크 중계 ({st['origin']}) · {when}"
+    if st.get("clock_skewed"):
+        return (f"{head} — 원본 시각이 서버보다 미래입니다. 시계·시간대를 확인하세요 "
+                f"(나이를 신뢰할 수 없어 오래된 것으로 취급)")
     if st["stale"]:
         return f"{head} — 오래된 호가입니다. 데스크 PC 연결을 확인하세요"
     if not st["source_time_supplied"]:

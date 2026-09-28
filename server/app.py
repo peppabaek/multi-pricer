@@ -580,6 +580,9 @@ class RelayPushRequest(BaseModel):
     # 데스크 PC 가 LSEG 에서 실제로 받은 시각. 없으면 도착 시각으로 대신하지만,
     # 그 사실이 화면에 표시된다.
     source_timestamp: Optional[str] = None
+    # 시간대가 섞이지 않는 절대 시각. 데스크와 서버가 다른 표준시에서 도는 것이
+    # 보통이므로 이쪽이 우선한다.
+    source_epoch_ms: Optional[float] = None
     origin: Optional[str] = None
 
 
@@ -625,7 +628,8 @@ def push_relayed_quotes(req: RelayPushRequest):
             skipped.append(f"{tenor}({e})")
 
     st = relay.record(req.currency, req.origin or "desk",
-                      req.source_timestamp, applied)
+                      req.source_timestamp, applied,
+                      source_epoch_ms=req.source_epoch_ms)
     return {"status": "success", "data": {
         "applied": applied, "skipped": skipped, "relay": st}}
 

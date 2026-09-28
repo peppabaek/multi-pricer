@@ -173,6 +173,57 @@ def t_10():
         raise AssertionError("비밀번호를 인자로 받으면 명령 이력에 남는다")
 
 
+@case("L24-11", "데스크와 서버의 시간대가 달라도 나이가 맞다")
+def t_11():
+    # 실제 배포에서 데스크는 서울(UTC+9), 서버는 UTC 였다. 벽시계 문자열을 그대로
+    # 빼니 원본 시각이 9시간 미래가 되어 나이가 영원히 0 이었고, 끊긴 중계가
+    # 계속 최신으로 보였다. 같은 PC 에서 하던 테스트로는 잡을 수 없던 결함이다.
+    import time as _t
+    relay.clear("USD")
+    seoul_wall = (datetime.datetime.now()
+                  + datetime.timedelta(hours=9)).strftime("%Y-%m-%d %H:%M:%S")
+    r = client.post("/api/quotes/push", json={
+        "currency": "USD", "quotes": quotes(), "origin": "desk-seoul",
+        "source_timestamp": seoul_wall,
+        "source_epoch_ms": (_t.time() - 300) * 1000,   # 실제로는 5분 전
+    })
+    if r.status_code != 200:
+        raise AssertionError(f"HTTP {r.status_code}")
+    st = client.get("/api/market-snapshot").json()["data"]["relay"]
+    if not (290 < st["age_seconds"] < 320):
+        raise AssertionError(
+            f"시간대 차이가 나이에 섞였다: {st['age_seconds']}s (300s 이어야 함)")
+    if not st["stale"]:
+        raise AssertionError("5분 지난 호가를 최신으로 표시")
+
+
+@case("L24-12", "원본 시각이 미래면 최신이라고 하지 않는다")
+def t_12():
+    # 0 으로 깎아 '방금'으로 보이게 하면, 시계가 어긋난 채로 끊긴 중계가 영원히
+    # 새 것이 된다. 모를 때는 신선하다고 하지 않는다.
+    import time as _t
+    relay.clear("USD")
+    client.post("/api/quotes/push", json={
+        "currency": "USD", "quotes": quotes(), "origin": "desk-skew",
+        "source_epoch_ms": (_t.time() + 3600) * 1000,
+    })
+    st = client.get("/api/market-snapshot").json()["data"]["relay"]
+    if not st.get("clock_skewed"):
+        raise AssertionError(f"미래 시각을 정상으로 받아들임: {st}")
+    if not st["stale"]:
+        raise AssertionError("시계가 어긋났는데 최신으로 표시")
+    if "시계" not in relay.describe("USD"):
+        raise AssertionError(f"원인을 알려주지 않음: {relay.describe('USD')!r}")
+
+
+@case("L24-13", "에이전트가 절대 시각을 함께 보낸다")
+def t_13():
+    with io.open(os.path.join(ROOT, "tools", "desk_relay.py"), encoding="utf-8") as f:
+        src = f.read()
+    if "source_epoch_ms" not in src:
+        raise AssertionError("에이전트가 벽시계 문자열만 보낸다 — 시간대가 어긋난다")
+
+
 if __name__ == "__main__":
     print("\n=== L24 데스크 → 클라우드 중계 ===")
     sys.exit(1 if run_all("L24") else 0)

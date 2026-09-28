@@ -103,6 +103,9 @@ def push_once(local, target, auth, currencies, origin, dry_run=False):
                 "currency": cur,
                 "quotes": quotes,
                 "source_timestamp": body.get("timestamp"),
+                # 벽시계 문자열만 보내면 데스크(서울)와 서버(UTC)의 9시간 차이가
+                # 그대로 나이 계산에 들어간다. 절대 시각을 함께 보낸다.
+                "source_epoch_ms": body.get("epoch_ms"),
                 "origin": origin,
             }, auth=auth)
             d = res.get("data", {})
