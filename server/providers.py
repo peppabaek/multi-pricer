@@ -10,8 +10,8 @@ two-model cross-validation cost nothing to run.
 
 A note on the free tiers: most of them reserve the right to train on what you send.
 This pipeline strips counterparty identity before anything leaves the process, but the
-economic terms still go out. Which vendor is acceptable is a compliance decision, not a
-technical one - see PROVIDERS[...]["data_policy"] for what each one claims.
+economic terms still go out. PROVIDERS[...]["data_policy"] records what each vendor
+states, so the dashboard can show it.
 """
 
 import os
