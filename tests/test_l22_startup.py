@@ -178,6 +178,84 @@ def t_8():
                 f"연결 상태 문구에 코드 결함이 섞여 있음: {msg!r}")
 
 
+@case("L22-9", "app.py 를 직접 실행해도 열린다")
+def t_9():
+    """
+    `python server/app.py` 는 43행의 `from server import relay` 에서 죽었습니다.
+    스크립트를 직접 실행하면 sys.path[0] 이 프로젝트 루트가 아니라 server/ 가
+    되기 때문입니다. 파일 끝의 __main__ 블록은 직접 실행을 의도한 코드인데
+    도달조차 못 했습니다 - 쓰라고 써 둔 문이 잠겨 있었습니다.
+    """
+    import socket
+    import urllib.request
+
+    port = 8117
+    env = dict(os.environ, PRICER_NO_LOCAL_FEED="1", PORT=str(port))
+    p = subprocess.Popen([sys.executable, os.path.join(ROOT, "server", "app.py")],
+                         cwd=ROOT, env=env,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, encoding="utf-8", errors="replace")
+    try:
+        deadline = time.time() + 90
+        up = False
+        while time.time() < deadline and p.poll() is None:
+            with socket.socket() as s:
+                s.settimeout(1)
+                if s.connect_ex(("127.0.0.1", port)) == 0:
+                    up = True
+                    break
+            time.sleep(0.5)
+        if p.poll() is not None:
+            out = (p.stdout.read() or "")[-500:]
+            raise AssertionError(f"직접 실행이 죽음:\n{out}")
+        if not up:
+            raise AssertionError("직접 실행했으나 포트가 열리지 않음")
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=30) as r:
+            if r.status != 200:
+                raise AssertionError(f"/healthz {r.status}")
+    finally:
+        p.terminate()
+        try:
+            p.wait(timeout=15)
+        except Exception:
+            p.kill()
+
+
+@case("L22-10", "데스크에서 포트를 바꿔도 사내망에 열리지 않는다")
+def t_10():
+    """
+    전에는 PORT 가 설정됐는지로 호스팅 여부를 판단했습니다. 포트 충돌을 피하려고
+    PORT=8001 을 준 데스크 PC 가 0.0.0.0 에 붙어 사내망에 열립니다 - 직접 실행이
+    불가능할 때는 무해했지만, 이제는 실제로 갈 수 있는 길입니다.
+    """
+    with io.open(os.path.join(ROOT, "server", "app.py"), encoding="utf-8") as f:
+        src = f.read()
+    tail = src[src.index('if __name__ == "__main__":'):]
+    if 'bool(os.environ.get("PORT"))' in tail:
+        raise AssertionError("PORT 설정 여부로 호스팅을 판단 — 포트만 바꿔도 0.0.0.0")
+    if "is_hosted" not in tail:
+        raise AssertionError("호스팅 판정에 is_hosted() 를 쓰지 않음")
+
+    # 판정 자체도 확인합니다: PORT 만으로는 호스팅이 아닙니다.
+    import server.access as access
+    saved = {k: os.environ.get(k) for k in ("PORT", "RENDER", "PRICER_HOSTED")}
+    try:
+        for k in ("RENDER", "PRICER_HOSTED"):
+            os.environ.pop(k, None)
+        os.environ["PORT"] = "8001"
+        if access.is_hosted():
+            raise AssertionError("PORT 만 설정했는데 호스팅으로 판정")
+        os.environ["RENDER"] = "true"
+        if not access.is_hosted():
+            raise AssertionError("RENDER 인데 호스팅이 아니라고 판정")
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 if __name__ == "__main__":
     print("\n=== L22 기동 로그 ===")
     sys.exit(1 if run_all("L22") else 0)

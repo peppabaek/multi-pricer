@@ -312,6 +312,110 @@ def t_16():
         raise AssertionError("KRW 처럼 호가가 최상위에 있는 응답을 읽지 못한다")
 
 
+@case("L24-17", "PowerShell 스크립트가 BOM 을 갖고 있다")
+def t_17():
+    """
+    Windows PowerShell 5.1 은 BOM 이 없는 .ps1 을 UTF-8 이 아니라 ANSI(CP949)로
+    읽습니다. 한글 주석이 깨지면서 따옴표 짝이 어긋나 파서가 통째로 죽었습니다:
+
+        + Write-Log "?꾨즺"
+        The string is missing the terminator
+
+    로그온 때 조용히 실패하는 종류라, 몇 주 뒤 "왜 BASE 지" 로 발견됩니다.
+    """
+    import codecs
+    for name in ("desk_autostart.ps1", "install_autostart.ps1"):
+        path = os.path.join(ROOT, "tools", name)
+        if not os.path.exists(path):
+            raise AssertionError(f"{name} 이 없음")
+        with open(path, "rb") as f:
+            head = f.read(3)
+        if head != codecs.BOM_UTF8:
+            raise AssertionError(
+                f"{name} 에 UTF-8 BOM 이 없음 — PowerShell 5.1 이 CP949 로 읽어 "
+                f"한글 주석에서 파서가 죽습니다")
+
+
+@case("L24-18", "자동 실행에서 인자 없이 떠야 하므로 설정을 .env 에서 읽는다")
+def t_18():
+    # 작업 스케줄러 인자에 비밀번호를 넣으면 작업 속성과 프로세스 목록에 평문으로
+    # 남습니다. 그래서 대상 주소도 자격증명도 .env 에서 읽습니다.
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import importlib
+    dr = importlib.import_module("desk_relay")
+
+    if not hasattr(dr, "load_env_file"):
+        raise AssertionError("에이전트가 .env 를 읽지 않음 — 자동 실행 시 인자가 필요해짐")
+
+    with io.open(os.path.join(ROOT, "tools", "desk_relay.py"), encoding="utf-8") as f:
+        src = f.read()
+    if 'required=True' in src:
+        raise AssertionError("--target 이 필수라 인자 없이 뜨지 못함")
+    for var in ("PRICER_RELAY_TARGET", "PRICER_RELAY_PASS"):
+        if var not in src:
+            raise AssertionError(f"{var} 를 읽지 않음")
+
+    # 이미 설정된 환경변수를 .env 가 덮어쓰면 손으로 실행할 때 제어가 안 됩니다.
+    saved = os.environ.get("PRICER_RELAY_TARGET")
+    os.environ["PRICER_RELAY_TARGET"] = "http://sentinel.invalid"
+    try:
+        dr.load_env_file()
+        if os.environ["PRICER_RELAY_TARGET"] != "http://sentinel.invalid":
+            raise AssertionError(".env 가 이미 설정된 환경변수를 덮어씀")
+    finally:
+        if saved is None:
+            os.environ.pop("PRICER_RELAY_TARGET", None)
+        else:
+            os.environ["PRICER_RELAY_TARGET"] = saved
+
+
+@case("L24-19", ".env 를 읽어도 로컬 대시보드에 인증이 켜지지 않는다")
+def t_19():
+    """
+    중계 자격증명을 PRICER_AUTH_USER/PASS 로 .env 에 넣었더니, term sheet 업로드가
+    load_env_file() 을 부르는 순간 그 값이 서버 프로세스의 환경변수로 들어가고
+    access.auth_required() 가 그걸 "이 서버가 요구할 자격증명"으로 읽어, 로컬
+    대시보드가 갑자기 비밀번호를 묻기 시작했습니다.
+
+    실사용으로는 이렇게 보입니다: localhost 에서 잘 쓰다가 문서 하나 올리면
+    그때부터 로그인 창이 뜬다. 원인과 증상이 멀어서 찾기 어려운 종류입니다.
+
+    중계가 원격에 제시하는 자격증명과, 이 서버가 요구하는 자격증명은 다른
+    것입니다. 이름을 나눠 둡니다.
+    """
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import importlib
+    import server.access as access
+    dr = importlib.import_module("desk_relay")
+
+    # 서버 쪽 이름을 비운 상태에서 .env 를 읽어도 게이트가 켜지면 안 됩니다.
+    saved = {k: os.environ.get(k)
+             for k in ("PRICER_AUTH_USER", "PRICER_AUTH_PASS", "RENDER",
+                       "PRICER_HOSTED", "PRICER_AUTH_DISABLED")}
+    try:
+        for k in saved:
+            os.environ.pop(k, None)
+        if access.auth_required():
+            raise AssertionError("시작부터 인증이 켜져 있음 - 검사가 무의미")
+        dr.load_env_file()
+        if access.auth_required():
+            raise AssertionError(
+                ".env 를 읽자 로컬 대시보드에 인증이 켜짐 — 중계 자격증명이 "
+                "PRICER_AUTH_* 라는 이름을 쓰고 있습니다")
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    with io.open(os.path.join(ROOT, "tools", "desk_relay.py"), encoding="utf-8") as f:
+        src = f.read()
+    for bad in ('os.environ.get("PRICER_AUTH_USER"', 'os.environ.get("PRICER_AUTH_PASS"'):
+        if bad in src:
+            raise AssertionError(f"중계가 서버의 인증 변수를 읽음: {bad}")
+
+
 if __name__ == "__main__":
     print("\n=== L24 데스크 → 클라우드 중계 ===")
     sys.exit(1 if run_all("L24") else 0)

@@ -119,3 +119,6 @@ Thumbs.db
 
 # 모바일 레이아웃 미리보기 스크린샷 (로컬 확인용)
 _preview/
+
+# 자동 실행 로그 (desk_autostart.ps1)
+logs/

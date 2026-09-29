@@ -17,7 +17,7 @@ App Key 는 이 PC 를 벗어나지 않습니다. 나가는 것은 호가 숫자
   --currencies  기본 USD,KRW,KOFR,CRS
   --dry-run     보내지 않고 무엇을 보낼지만 출력
 
-비밀번호는 PRICER_AUTH_PASS 환경변수에서 읽습니다. 인자로 받지 않는 것은
+비밀번호는 PRICER_RELAY_PASS 환경변수에서 읽습니다. 인자로 받지 않는 것은
 명령 이력에 남기지 않기 위해서입니다.
 """
 import argparse
@@ -74,6 +74,35 @@ def read_local(local, currency):
          "bid": q.get("bid"), "ask": q.get("ask")}
         for q in quotes if q.get("tenor") and q.get("mid") is not None
     ]
+
+
+def load_env_file():
+    """
+    루트의 .env 에서 아직 설정되지 않은 값만 채운다.
+
+    부팅 시 자동 실행하려면 비밀번호가 어딘가에 있어야 하는데, 작업 스케줄러의
+    인자로 넣으면 작업 속성과 프로세스 목록에 평문으로 남습니다. .env 는 이미
+    git 에서 제외돼 있고 API 키들이 사는 곳이니 같이 둡니다.
+
+    이미 환경변수로 준 값은 건드리지 않습니다 - 손으로 실행할 때 덮어쓸 수
+    있어야 합니다.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, ".env")
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                if key and key not in os.environ:
+                    os.environ[key] = value.strip().strip('"').strip("'")
+    except OSError:
+        pass
 
 
 def feed_is_live(body):
@@ -141,22 +170,37 @@ def push_once(local, target, auth, currencies, origin, dry_run=False):
 
 
 def main():
+    load_env_file()
     ap = argparse.ArgumentParser()
     ap.add_argument("--local", default="http://127.0.0.1:8000",
                     help="Workspace 가 붙어 있는 이 PC 의 프라이서")
-    ap.add_argument("--target", required=True, help="배포된 프라이서 주소")
-    ap.add_argument("--user", default=os.environ.get("PRICER_AUTH_USER", ""))
+    # 자동 실행(작업 스케줄러)에서는 인자 없이 떠야 하므로 .env 의
+    # PRICER_RELAY_TARGET 을 기본값으로 씁니다. 손으로 줄 때는 그게 이깁니다.
+    ap.add_argument("--target", default=os.environ.get("PRICER_RELAY_TARGET", ""),
+                    help="배포된 프라이서 주소 (.env 의 PRICER_RELAY_TARGET)")
+    # PRICER_AUTH_* 가 아니라 PRICER_RELAY_* 입니다. 이름을 같이 쓰면, .env 를
+    # 읽는 순간(예: term sheet 업로드) 서버의 access 게이트가 그 값을 "이 서버가
+    # 요구할 자격증명"으로 읽고 로컬 대시보드에 인증을 켜버립니다. 중계가
+    # 원격에 제시하는 자격증명과 이 서버가 요구하는 자격증명은 다른 것입니다.
+    ap.add_argument("--user", default=os.environ.get("PRICER_RELAY_USER", ""))
     ap.add_argument("--interval", type=int, default=30, help="전송 주기(초)")
     ap.add_argument("--currencies", default="USD,KRW,KOFR,CRS,FWD")
-    ap.add_argument("--origin", default=os.environ.get("COMPUTERNAME", "desk"))
+    # 배포본 배지에 "데스크 PC(...) 중계" 로 찍히는 이름. 컴퓨터명이 기본이지만
+    # 31503918-B6BF 같은 자산번호라 알아보기 어려워, .env 로 덮을 수 있게 합니다.
+    ap.add_argument("--origin", default=(os.environ.get("PRICER_RELAY_ORIGIN")
+                                         or os.environ.get("COMPUTERNAME", "desk")))
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
-    password = os.environ.get("PRICER_AUTH_PASS", "")
+    if not a.target:
+        sys.exit("배포된 주소가 없습니다 — --target 을 주거나 .env 에 "
+                 "PRICER_RELAY_TARGET 을 설정하세요")
+
+    password = os.environ.get("PRICER_RELAY_PASS", "")
     auth = (a.user, password) if a.user else None
     if a.user and not password:
-        sys.exit("PRICER_AUTH_PASS 환경변수를 설정하세요 (인자로 받지 않습니다)")
+        sys.exit("PRICER_RELAY_PASS 환경변수를 설정하세요 (인자로 받지 않습니다)")
 
     currencies = [c.strip().upper() for c in a.currencies.split(",") if c.strip()]
     unknown = [c for c in currencies if c not in SOURCES]

@@ -8,6 +8,20 @@ import json
 import re
 import sys
 import datetime
+
+# `python server/app.py` 로도 열리도록.
+#
+# 스크립트를 직접 실행하면 파이썬은 sys.path[0] 에 프로젝트 루트가 아니라 그
+# 스크립트가 있는 폴더(server/)를 넣습니다. 그러면 아래의 `from server import
+# relay` 가 자기 자신을 찾지 못해 ModuleNotFoundError 로 죽고, 파일 끝의
+# __main__ 블록은 도달조차 하지 못했습니다 - 직접 실행하라고 써 둔 코드가
+# 직접 실행할 수 없었던 셈입니다.
+#
+# -m uvicorn 으로 띄울 때는 루트가 이미 경로에 있어 이 줄은 아무것도 하지
+# 않습니다.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 import time
 import asyncio
 import warnings
@@ -1822,9 +1836,14 @@ app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    # A host supplies PORT and needs every interface; on the desk, stay on localhost.
+    from server.access import is_hosted
+
+    # 어느 인터페이스에 붙일지는 "호스팅 환경인가" 로 정합니다. 전에는 PORT 가
+    # 설정됐는지로 판단했는데, 그러면 포트만 바꾸려고 PORT=8001 을 준 데스크
+    # PC 가 0.0.0.0 에 붙어 사내망에 열립니다. is_hosted() 는 Render 등이
+    # 스스로 내거는 표시를 봅니다.
+    hosted = is_hosted()
     port = int(os.environ.get("PORT", "8000"))
-    hosted = bool(os.environ.get("PORT"))
     uvicorn.run("server.app:app",
                 host="0.0.0.0" if hosted else "127.0.0.1",
                 port=port, reload=not hosted)
