@@ -142,7 +142,9 @@ def cmd_check(url):
             req.add_header("Authorization", f"Basic {token}")
         try:
             with urllib.request.urlopen(req, timeout=90) as r:
-                return r.status, r.read(400).decode("utf-8", "replace")
+                # 400 바이트만 읽으면 <head> 밖에 못 봅니다. 스크립트 태그는
+                # 문서 끝에 있어서, 맞는 페이지를 틀렸다고 보고했습니다.
+                return r.status, r.read(200000).decode("utf-8", "replace")
         except urllib.error.HTTPError as e:
             return e.code, ""
         except Exception as e:
@@ -154,11 +156,59 @@ def cmd_check(url):
     code, _ = get("/")
     print(f"  대시보드(무인증)  : {code}   "
           f"{'(401 이어야 정상 — 닫혀 있음)' if code == 401 else '(503 이면 인증 미설정)'}")
-    if user:
-        code, _ = get("/", auth=True)
-        print(f"  대시보드(인증)    : {code}   (200 이어야 함)")
+    if not user:
+        print("  이후 항목         : 건너뜀 — PRICER_AUTH_USER/PASS 를 환경변수로 주면 확인합니다")
+        return 0
+
+    code, body = get("/", auth=True)
+    print(f"  대시보드(인증)    : {code}   (200 이어야 함)")
+
+    # 휴대폰 화면이 올라갔는지. 게이트가 라우팅보다 먼저 돌아서 인증 없이는
+    # 있는지 없는지조차 알 수 없습니다(둘 다 401).
+    code, body = get("/m", auth=True)
+    if code != 200:
+        print(f"  휴대폰 화면 /m    : {code}   (200 이어야 함 — 아직 배포 안 됨)")
+    elif "mobile-actions" not in body and "m.js" not in body:
+        print(f"  휴대폰 화면 /m    : 200 인데 내용이 다름 — 옛 빌드일 수 있음")
     else:
-        print("  대시보드(인증)    : 건너뜀 — PRICER_AUTH_USER/PASS 를 환경변수로 주면 확인합니다")
+        print(f"  휴대폰 화면 /m    : {code}   OK")
+
+    # 사진 경로가 켜져 있는지. render.yaml 의 값이 실제로 반영됐는지는 이렇게만
+    # 알 수 있습니다. 1x1 JPEG 이라 모델 비용은 사실상 없고, 플래그 검사는 모델
+    # 호출보다 먼저 돌기 때문에 꺼져 있으면 그 자리에서 걸립니다.
+    print("  사진 경로         : 확인 중… (최대 2분)")
+    tiny = base64.b64decode(
+        "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRof"
+        "Hh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAAB"
+        "AAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==")
+    boundary = "----pricercheck"
+    payload = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="probe.jpg"\r\n'
+        f"Content-Type: image/jpeg\r\n\r\n").encode() + tiny + \
+        f"\r\n--{boundary}--\r\n".encode()
+    req = urllib.request.Request(url + "/api/termsheet/extract", data=payload)
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    req.add_header("Authorization",
+                   "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode())
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r:
+            detail = r.read(600).decode("utf-8", "replace")
+            code = r.status
+    except urllib.error.HTTPError as e:
+        code, detail = e.code, e.read(600).decode("utf-8", "replace")
+    except Exception as e:
+        code, detail = 0, str(e)
+
+    if "TERMSHEET_ALLOW_IMAGE" in detail:
+        print("  사진 경로         : 꺼져 있음 — Render 환경변수를 1 로 바꾸세요")
+    elif code == 0:
+        print(f"  사진 경로         : 확인 실패 ({detail[:60]})")
+    else:
+        # 1x1 흰 점이라 모델이 거래조건을 찾지 못하는 것이 정상입니다. 중요한
+        # 것은 '꺼져 있다'로 막히지 않았다는 사실입니다.
+        print(f"  사진 경로         : 켜져 있음 (HTTP {code} — 1x1 시험 이미지라 "
+              f"내용 없음은 정상)")
 
 
 def main():
