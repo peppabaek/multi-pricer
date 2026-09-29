@@ -803,6 +803,29 @@ def primary_provider() -> str:
 _PROVIDER_COOLDOWN: Dict[str, float] = {}
 _COOLDOWN_SECONDS = 600
 
+# 사다리 전체에 시간 예산을 둡니다.
+#
+# 재시도 자체에는 sleep 이 없지만, 프리티어가 분당 한도에 걸리면 한 모델이
+# 답하는 데만 수십 초가 걸립니다. 실측: 같은 사진을 연속으로 올렸을 때 1회차
+# 17.9초, 2회차 122초, 3회차 91초. 브라우저와 모바일 네트워크는 그 전에 끊고,
+# 사용자에게는 원인을 알 수 없는 "fetch error" 만 남습니다.
+#
+# 예산을 넘기면 새 시도를 시작하지 않고, 무엇 때문에 오래 걸렸는지 말합니다.
+# 이미 시작한 호출을 중간에 끊지는 않습니다 - 그건 프로바이더 쪽 타임아웃입니다.
+_LADDER_BUDGET_SECONDS = float(os.environ.get("TERMSHEET_BUDGET_SECONDS", "75"))
+
+
+def _budget_exceeded(started: float) -> bool:
+    return (time.time() - started) > _LADDER_BUDGET_SECONDS
+
+
+def _timeout_message(attempts: List[Dict[str, str]], elapsed: float) -> str:
+    tried = " / ".join(f"{a['label']} {a.get('model', '')}: {a['reason']}"
+                       for a in attempts) or "응답 없음"
+    return (f"분석이 {elapsed:.0f}초를 넘겨 중단했습니다 ({tried}). "
+            f"무료 등급은 분당 호출 한도가 있어 연속으로 올리면 느려집니다 — "
+            f"1~2분 뒤 다시 시도하거나 GROQ_API_KEY 를 추가하세요.")
+
 
 def _cooling_off(name: str) -> bool:
     until = _PROVIDER_COOLDOWN.get(name, 0)
@@ -904,7 +927,10 @@ def call_extractor(redacted_text: str, model: str = None,
     # have, try it anyway rather than refusing to read the document.
     order = [c for c in cands if not _cooling_off(f"{c[0]}:{c[1]}")] or cands
 
+    started = time.time()
     for n, mdl in order:
+        if attempts and _budget_exceeded(started):
+            raise ValueError(_timeout_message(attempts, time.time() - started))
         try:
             trade = get_extractor(n, model_name=mdl)(redacted_text)
         except Exception as e:
@@ -968,7 +994,10 @@ def call_vision_extractor(raw: bytes, mime: str,
     cands = [(n, m) for n in runnable for m in model_candidates(n)]
     order = [c for c in cands if not _cooling_off(f"{c[0]}:{c[1]}")] or cands
 
+    started = time.time()
     for n, mdl in order:
+        if attempts and _budget_exceeded(started):
+            raise ValueError(_timeout_message(attempts, time.time() - started))
         fn = get_vision_extractor(n, model_name=mdl)
         if fn is None:
             continue
@@ -1109,6 +1138,43 @@ def _fmt(n: Optional[float]) -> str:
     return f"{n:,.0f}" if n is not None else ""
 
 
+def tenor_from_dates(effective: Optional[str], maturity: Optional[str]) -> Optional[str]:
+    """
+    개시일과 만기일에서 테너를 읽어낸다.
+
+    모델이 테너를 따로 적어주지 않는 일이 흔합니다 - 문서에 "9 months" 라고
+    쓰여 있지 않고 날짜 두 개만 있으면 그렇습니다. 그때 통화별 기본값(KRW 는
+    3Y)을 채우면, 검토 창이 9개월짜리 거래를 3Y 이라고 보여줍니다. 가격은
+    만기일로 계산되니 맞는데, 화면만 틀립니다 - 트레이더가 조건을 확인하라고
+    띄운 창이 잘못된 조건을 보여주는 셈입니다.
+
+    날짜가 있으면 지어내지 않고 거기서 읽습니다.
+    """
+    if not (effective and maturity):
+        return None
+    try:
+        a = datetime.date.fromisoformat(str(effective).strip()[:10])
+        b = datetime.date.fromisoformat(str(maturity).strip()[:10])
+    except ValueError:
+        return None
+    if b <= a:
+        return None
+
+    months = (b.year - a.year) * 12 + (b.month - a.month)
+    if b.day < a.day:
+        months -= 1
+    if months <= 0:
+        # 한 달이 안 되는 거래. 주 단위가 읽기 쉽습니다.
+        weeks = max(1, round((b - a).days / 7))
+        return f"{weeks}W"
+    # 열두 달로 나누어떨어지면 연 단위가 데스크가 쓰는 표기입니다.
+    if months % 12 == 0:
+        return f"{months // 12}Y"
+    if months >= 18 and months % 6 == 0:
+        return f"{months}M"
+    return f"{months}M"
+
+
 def to_ticket_draft(trade: ExtractedTrade) -> Dict[str, Any]:
     """Map extracted terms onto the dashboard's ticket shape, marking which fields are defaults."""
     curr = trade.currency or "USD"
@@ -1122,12 +1188,17 @@ def to_ticket_draft(trade: ExtractedTrade) -> Dict[str, Any]:
         return value
 
     notional = trade.usd_notional if curr == "KRW_CRS" and trade.usd_notional else trade.notional
+    derived_tenor = tenor_from_dates(trade.effective_date, trade.maturity_date)
     draft = {
         "product": curr,
         "position": pick(trade.position, "Pay Fixed", "position"),
         "notionalDisplay": _fmt(pick(notional, d["notional"], "notional")),
-        "customTenorInput": pick(trade.tenor, d["tenor"], "tenor"),
-        "selectedTenor": trade.tenor or d["tenor"],
+        # 날짜에서 읽은 테너는 "시장 관행 적용" 이 아닙니다 - 문서에 적힌 날짜
+        # 두 개에서 나온 값입니다. 통화 기본값까지 내려갔을 때만 지어낸 것으로
+        # 표시합니다.
+        "customTenorInput": (trade.tenor or derived_tenor
+                             or pick(None, d["tenor"], "tenor")),
+        "selectedTenor": trade.tenor or derived_tenor or d["tenor"],
         "effectiveDate": trade.effective_date or "",
         "maturityDate": trade.maturity_date or "",
         "coupon": f"{trade.fixed_coupon_pct:.4f}" if trade.fixed_coupon_pct is not None else "",

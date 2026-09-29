@@ -274,13 +274,31 @@
 
     let tsPending = null;
 
+    // 분석은 보통 20초 안에 끝나지만, 프리티어가 분당 한도에 걸리면 사다리를
+    // 걷느라 2분까지 갑니다. 브라우저 기본 동작에 맡기면 아무 설명 없이 끊기고
+    // "fetch error" 만 남습니다. 직접 끊고 무슨 일인지 말합니다.
+    const UPLOAD_TIMEOUT_MS = 150000;
+
     async function uploadTermsheet(file) {
         if (!file) return;
-        busy(true, (file.name || "문서") + " 분석 중…");
+        const label = file.name || "문서";
+        busy(true, label + " 분석 중…");
+
+        // 가만히 있는 화면은 2분이면 멈춘 것처럼 보입니다. 초를 셉니다.
+        const t0 = Date.now();
+        const ticker = setInterval(() => {
+            const s = Math.round((Date.now() - t0) / 1000);
+            $("busy-text").textContent = label + " 분석 중… " + s + "초"
+                + (s > 30 ? " (프리티어 한도로 느려질 수 있습니다)" : "");
+        }, 1000);
+
+        const ctl = new AbortController();
+        const killer = setTimeout(() => ctl.abort(), UPLOAD_TIMEOUT_MS);
         try {
             const body = new FormData();
             body.append("file", file, file.name || "upload");
-            const resp = await fetch("/api/termsheet/extract", { method: "POST", body });
+            const resp = await fetch("/api/termsheet/extract",
+                                     { method: "POST", body, signal: ctl.signal });
             const json = await resp.json();
             if (!resp.ok) throw new Error(json.detail || ("HTTP " + resp.status));
             const data = json.data;
@@ -292,8 +310,16 @@
             renderReview(data, file.name);
             $("ts-modal").hidden = false;
         } catch (err) {
-            notice("Term Sheet 분석 실패: " + err.message, true);
+            if (err.name === "AbortError") {
+                notice("분석이 " + Math.round(UPLOAD_TIMEOUT_MS / 1000)
+                     + "초를 넘겨 중단했습니다. 무료 등급은 분당 호출 한도가 있어 "
+                     + "연속으로 올리면 느려집니다 — 1~2분 뒤 다시 시도해주세요.", true);
+            } else {
+                notice("Term Sheet 분석 실패: " + err.message, true);
+            }
         } finally {
+            clearInterval(ticker);
+            clearTimeout(killer);
             busy(false);
             $("ts-file").value = "";
         }
@@ -371,15 +397,13 @@
         if (!present.length) return;
         add(parent, "div", "ts-sec", title);
         present.forEach(([k, label]) => {
-            const guessed = inferred.has(snake(k));
+            const guessed = inferred.has(C.TS_FIELD_KEY[k] || k);
             const row = add(parent, "div", "ts-row" + (guessed ? " guess" : ""), "");
             add(row, "span", "k", label);
             const v = add(row, "span", "v", String(t[k]));
             if (guessed) add(v, "span", "why", "문서에 없음 — 시장 관행 적용");
         });
     }
-
-    function snake(s) { return s.replace(/([A-Z0-9])/g, "_$1").toLowerCase(); }
 
     function add(parent, tag, cls, text) {
         const el = document.createElement(tag);

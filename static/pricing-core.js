@@ -37,6 +37,30 @@
         },
     };
 
+    /**
+     * 티켓 키 → 추출기 필드명.
+     *
+     * 서버의 inferred_fields / unverified_fields / provenance 는 추출기 쪽
+     * 이름(tenor, notional)을 쓰고, 검토 창의 행은 티켓 키(customTenorInput,
+     * notionalDisplay)로 되어 있습니다. 휴대폰 화면에서 이 변환을 camelCase →
+     * snake_case 규칙으로 때웠는데, customTenorInput → custom_tenor_input 이
+     * 되어 tenor 와 맞지 않았습니다. 그래서 서버가 채운 기본값이 문서에서 읽은
+     * 사실처럼 보였습니다 - 9개월짜리 거래에 3Y 이 아무 표시 없이 떴습니다.
+     *
+     * 규칙으로 유추하지 않고 적어 둡니다. 데스크톱의 TS_FIELD_KEY 와 같은 표입니다.
+     */
+    const TS_FIELD_KEY = {
+        notionalDisplay: "notional", customTenorInput: "tenor",
+        effectiveDate: "effective_date", maturityDate: "maturity_date",
+        coupon: "fixed_coupon_pct", spreadBp: "spread_bp", position: "position",
+        leg1DayCount: "leg1_day_count", leg1PaymentFreq: "leg1_payment_freq",
+        leg1Convention: "leg1_business_day_conv", leg1Stub: "leg1_stub_rule",
+        leg1Adjust: "leg1_adjust_rule", leg1PayCal: "leg1_calendar",
+        leg2DayCount: "leg2_day_count", leg2PaymentFreq: "leg2_payment_freq",
+        leg2Convention: "leg2_business_day_conv", leg2Stub: "leg2_stub_rule",
+        leg2Adjust: "leg2_adjust_rule", leg2Cal: "leg2_calendar",
+    };
+
     const ORDER = ["USD", "KRW", "KRW_KOFR", "KRW_CRS"];
 
     /**
@@ -215,5 +239,6 @@
     root.PricingCore = {
         PRODUCTS, ORDER, readResults, buildRequest, overridesFromTicket,
         feedState, relayFor, money, pct, commas, numOrNull, numOrDefault,
+        TS_FIELD_KEY,
     };
 })(window);
