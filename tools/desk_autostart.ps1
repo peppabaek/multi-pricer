@@ -13,8 +13,14 @@
   보내지 않음" 을 찍으며 다음 주기를 기다립니다. 기준호가를 실시간인 것처럼
   중계하지 않기 위해서입니다.
 
-  창은 최소화로 띄웁니다. 숨기면 무엇이 도는지 알 수 없어서, 실제로 "분명히
-  껐는데 왜 돌지" 하는 혼란이 있었습니다. 로그도 logs\ 에 함께 남깁니다.
+  창은 숨깁니다. 처음에는 "숨기면 무엇이 도는지 알 수 없다" 는 이유로 최소화만
+  했는데, 출력은 전부 logs\ 로 돌려놓은 상태였습니다. 그래서 부팅할 때마다
+  아무것도 찍히지 않는 도스창 두 개가 떴고 - 고장난 것처럼 보이니 닫게 되고 -
+  창을 닫으면 프라이서와 중계가 같이 죽어 배포본이 BASE 로 떨어졌습니다.
+
+  무엇이 도는지는 창이 아니라 이렇게 봅니다:
+      powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Status
+      logselay.out.log  /  logs\pricer.err.log
 
 .PARAMETER Python
   쓸 파이썬 실행 파일. install_autostart.ps1 이 설치 시점의 경로를 넣어줍니다.
@@ -41,11 +47,15 @@ function Write-Log($msg) {
     Add-Content -Path (Join-Path $logs "autostart.log") -Value $line -Encoding utf8
 }
 
-function Test-Port($p) {
-    $c = New-Object Net.Sockets.TcpClient
-    try { $c.Connect("127.0.0.1", $p); return $true }
-    catch { return $false }
-    finally { $c.Dispose() }
+# 포트가 열려 있다는 것과 프라이서가 살아 있다는 것은 다릅니다. 실제로 죽은
+# 부모의 소켓과 고아 자식이 8000 을 붙들고 있던 적이 있어, 포트만 보고
+# "이미 실행 중" 으로 건너뛰었습니다. /healthz 로 물어봅니다.
+function Test-Pricer($p) {
+    try {
+        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$p/healthz" -UseBasicParsing `
+             -TimeoutSec 5 -ErrorAction Stop
+        return $r.StatusCode -eq 200
+    } catch { return $false }
 }
 
 Write-Log "시작 — root=$root python=$Python"
@@ -53,14 +63,14 @@ Write-Log "시작 — root=$root python=$Python"
 # ---- 1. 로컬 프라이서 -------------------------------------------------------
 # 이미 떠 있으면 두 번 띄우지 않습니다. 두 번째는 포트를 못 잡고 죽을 뿐이지만,
 # 로그에 실패가 쌓여 진짜 문제를 가립니다.
-if (Test-Port $Port) {
+if (Test-Pricer $Port) {
     Write-Log "로컬 프라이서: 이미 $Port 포트에서 실행 중 — 건너뜀"
 } else {
     Start-Process -FilePath $Python `
         -ArgumentList @("-m", "uvicorn", "server.app:app",
                         "--host", "127.0.0.1", "--port", "$Port",
                         "--log-level", "warning") `
-        -WorkingDirectory $root -WindowStyle Minimized `
+        -WorkingDirectory $root -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $logs "pricer.out.log") `
         -RedirectStandardError  (Join-Path $logs "pricer.err.log")
     Write-Log "로컬 프라이서: 실행함 (포트 $Port)"
@@ -69,10 +79,10 @@ if (Test-Port $Port) {
 # 중계가 첫 주기에 헛돌지 않도록 포트가 열릴 때까지 기다립니다. 안 열려도
 # 중계는 뜹니다 - 읽기 실패는 통화별로 잡히고 다음 주기에 다시 시도합니다.
 $deadline = (Get-Date).AddSeconds(90)
-while (-not (Test-Port $Port) -and (Get-Date) -lt $deadline) {
+while (-not (Test-Pricer $Port) -and (Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 2
 }
-if (Test-Port $Port) { Write-Log "로컬 프라이서: 응답 확인" }
+if (Test-Pricer $Port) { Write-Log "로컬 프라이서: 응답 확인" }
 else { Write-Log "로컬 프라이서: 90초 안에 응답 없음 — 중계는 그대로 띄웁니다" }
 
 # ---- 2. 중계 에이전트 -------------------------------------------------------
@@ -85,7 +95,7 @@ if ($running) {
 } else {
     Start-Process -FilePath $Python `
         -ArgumentList @("-u", "tools\desk_relay.py") `
-        -WorkingDirectory $root -WindowStyle Minimized `
+        -WorkingDirectory $root -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $logs "relay.out.log") `
         -RedirectStandardError  (Join-Path $logs "relay.err.log")
     Write-Log "중계: 실행함"

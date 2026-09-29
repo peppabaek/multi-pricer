@@ -256,6 +256,65 @@ def t_10():
                 os.environ[k] = v
 
 
+@case("L22-11", "자동 리로드는 기본으로 꺼져 있다")
+def t_11():
+    """
+    uvicorn 의 reload 는 파일을 감시하는 부모와 서빙하는 자식, 두 프로세스로
+    돕니다. 데스크에서 창을 닫거나 부모가 죽으면 자식이 살아남아 포트를 계속
+    붙듭니다. 그러면 자동 실행 스크립트가 "이미 실행 중" 으로 건너뛰고, 아무도
+    관리하지 않는 고아가 호가를 서빙합니다.
+
+    실제로 그렇게 됐습니다: 부모 PID 는 사라졌는데 8000 은 리스닝 중이었고,
+    자식(multiprocessing.spawn)이 남아 있었습니다.
+    """
+    with io.open(os.path.join(ROOT, "server", "app.py"), encoding="utf-8") as f:
+        src = f.read()
+    tail = src[src.index('if __name__ == "__main__":'):]
+    if "reload=not hosted" in tail:
+        raise AssertionError("데스크에서 리로더가 기본으로 켜짐 — 고아 프로세스가 생깁니다")
+    if "PRICER_RELOAD" not in tail:
+        raise AssertionError("리로드를 켤 방법이 없음")
+
+    # 환경변수가 없으면 꺼져 있어야 합니다.
+    saved = os.environ.pop("PRICER_RELOAD", None)
+    try:
+        val = os.environ.get("PRICER_RELOAD", "").strip().lower() in ("1", "true", "yes")
+        if val:
+            raise AssertionError("기본값이 켜짐")
+    finally:
+        if saved is not None:
+            os.environ["PRICER_RELOAD"] = saved
+
+
+@case("L22-12", "자동 실행이 포트가 아니라 응답으로 판단한다")
+def t_12():
+    # 죽은 부모의 소켓과 고아 자식이 8000 을 붙들고 있어도 TCP 연결은 됩니다.
+    # 포트만 보고 건너뛰면 그 좀비를 정상으로 취급합니다.
+    path = os.path.join(ROOT, "tools", "desk_autostart.ps1")
+    with io.open(path, encoding="utf-8-sig") as f:
+        ps = f.read()
+    if "Net.Sockets.TcpClient" in ps:
+        raise AssertionError("아직 TCP 연결만으로 판단 — 좀비를 걸러내지 못합니다")
+    if "/healthz" not in ps:
+        raise AssertionError("살아 있는지 묻지 않음")
+
+
+@case("L22-13", "자동 실행 창이 보이지 않는다")
+def t_13():
+    """
+    출력은 전부 logs\ 로 보내면서 창은 최소화로 띄웠더니, 부팅할 때마다
+    아무것도 찍히지 않는 도스창 두 개가 떴습니다. 고장난 것처럼 보이니 닫게
+    되고, 닫으면 프라이서와 중계가 같이 죽어 배포본이 BASE 로 떨어졌습니다.
+    """
+    path = os.path.join(ROOT, "tools", "desk_autostart.ps1")
+    with io.open(path, encoding="utf-8-sig") as f:
+        ps = f.read()
+    if "-WindowStyle Minimized" in ps:
+        raise AssertionError("빈 창이 뜹니다 — 출력은 파일로 가는데 창만 남습니다")
+    if ps.count("-WindowStyle Hidden") < 2:
+        raise AssertionError("프라이서와 중계 둘 다 숨기지 않음")
+
+
 if __name__ == "__main__":
     print("\n=== L22 기동 로그 ===")
     sys.exit(1 if run_all("L22") else 0)
