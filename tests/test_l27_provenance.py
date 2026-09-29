@@ -191,6 +191,101 @@ def t_9():
         raise AssertionError("FWD 도 비실시간일 때 확인 없이 복사됨")
 
 
+@case("L27-10", "중계로 들어온 호가를 기준호가라고 부르지 않는다")
+def t_10():
+    """
+    L27-1 의 반대 방향입니다. 클라우드에는 Workspace 가 없어 피드의
+    is_live_connected 가 언제나 거짓이고, 그래서 출처가 "Baseline (비실시간)" 으로
+    나갔습니다 - 데스크가 방금 보낸, par 가 소수점까지 일치하는 실시간 호가인데도.
+
+    배포본에서 실측: par 는 데스크와 같은 4.8015 인데 출처는 "Tradeweb Composite
+    Baseline (비실시간)".
+
+    기준호가를 실시간이라고 부르는 것만 막으면 절반입니다. 실시간을 기준호가라고
+    부르면 경고가 늘 켜져 있게 되고, 늘 켜진 경고는 아무도 보지 않습니다.
+    """
+    import time as _t
+    from fastapi.testclient import TestClient
+    from server.app import app
+    from server import relay
+    from server.tradition_feed import tradition_feed
+
+    import server.app as app_module
+
+    client = TestClient(app)
+    saved = tradition_feed.is_lseg_live_connected
+    # 이 PC 에는 Workspace 가 실제로 떠 있어서, _warm_once 가 조회하며 플래그를
+    # 되돌립니다. 클라우드 상태를 흉내내려면 그 조회를 막아야 합니다.
+    warmed = "usd" in app_module._WARMED
+    app_module._WARMED.add("usd")
+    tradition_feed.is_lseg_live_connected = False      # 클라우드와 같은 상태
+    relay.clear("USD")
+    try:
+        # 중계가 없으면 기준호가가 맞습니다.
+        src = client.get("/api/market-snapshot").json()["data"]["source"]
+        if "Baseline" not in src and "비실시간" not in src:
+            raise AssertionError(f"중계도 없는데 기준호가라고 하지 않음: {src!r}")
+
+        # 데스크가 보내면 그 사실이 출처에 나와야 합니다.
+        r = client.post("/api/quotes/push", json={
+            "currency": "USD", "origin": "desk-test",
+            "source_epoch_ms": _t.time() * 1000,
+            "quotes": [{"tenor": "5Y", "mid": 4.5}]})
+        if r.status_code != 200:
+            raise AssertionError(f"중계 푸시 실패: {r.status_code} {r.text[:120]}")
+
+        src = client.get("/api/market-snapshot").json()["data"]["source"]
+        if "비실시간" in src or "Baseline" in src:
+            raise AssertionError(
+                f"중계 중인데 기준호가라고 표시: {src!r} — 거짓 경고가 상시로 켜집니다")
+        if "중계" not in src:
+            raise AssertionError(f"중계라는 사실이 출처에 없음: {src!r}")
+        if "desk-test" not in src:
+            raise AssertionError(f"어느 데스크에서 왔는지 없음: {src!r}")
+
+        # 프라이싱 응답도 같은 말을 해야 합니다 - 복사문이 읽는 것은 이쪽입니다.
+        info = client.post("/api/price", json={
+            "currency": "USD", "notional": 100000000.0,
+            "position": "Pay Fixed", "tenor": "5Y"}).json()["data"]["snapshot_info"]
+        if "중계" not in str(info.get("source")):
+            raise AssertionError(f"프라이싱 응답의 출처가 다름: {info.get('source')!r}")
+    finally:
+        relay.clear("USD")
+        tradition_feed.is_lseg_live_connected = saved
+        if not warmed:
+            app_module._WARMED.discard("usd")
+
+
+@case("L27-11", "중계가 오래되면 다시 기준호가로 돌아간다")
+def t_11():
+    # 데스크가 꺼진 뒤에도 "실시간" 이라고 하면, 멈춘 호가를 시장가로 읽습니다.
+    import time as _t
+    from fastapi.testclient import TestClient
+    from server.app import app
+    from server import relay
+    from server.tradition_feed import tradition_feed
+
+    import server.app as app_module
+
+    client = TestClient(app)
+    saved = tradition_feed.is_lseg_live_connected
+    app_module._WARMED.add("usd")
+    tradition_feed.is_lseg_live_connected = False
+    relay.clear("USD")
+    try:
+        old_ms = (_t.time() - relay.stale_after() - 60) * 1000
+        client.post("/api/quotes/push", json={
+            "currency": "USD", "origin": "desk-old", "source_epoch_ms": old_ms,
+            "quotes": [{"tenor": "5Y", "mid": 4.5}]})
+        src = client.get("/api/market-snapshot").json()["data"]["source"]
+        if "중계" in src and "비실시간" not in src:
+            raise AssertionError(
+                f"끊긴 중계를 실시간이라고 표시: {src!r}")
+    finally:
+        relay.clear("USD")
+        tradition_feed.is_lseg_live_connected = saved
+
+
 if __name__ == "__main__":
     print("\n=== L27 이 숫자가 어디서 왔는가 ===")
     sys.exit(1 if run_all("L27") else 0)

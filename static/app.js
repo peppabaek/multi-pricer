@@ -1236,8 +1236,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (relaying) {
             const age = Math.round(lastRelay.age_seconds || 0);
+            // 서버가 이미 "데스크 중계 (origin) — 실시간" 을 내려줍니다. 여기서
+            // 또 붙이면 같은 말이 두 번 나옵니다.
             return { kind: "relay", label: `● RELAY (${age}s)`, realtime: true,
-                     source: `데스크 중계 ${lastRelay.origin || ""} · ${src}`.trim() };
+                     source: src || `데스크 중계 ${lastRelay.origin || ""}`.trim() };
         }
         return { kind: "base", label: "● BASE (비실시간)", realtime: false,
                  source: src || "기준호가 (비실시간)" };

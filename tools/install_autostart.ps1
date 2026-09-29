@@ -33,7 +33,8 @@
 param(
     [switch]$Uninstall,
     [switch]$Status,
-    [int]$DelaySeconds = 60
+    [int]$DelaySeconds = 60,
+    [int]$RepeatMinutes = 10
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,8 +52,12 @@ function Show-Status {
     } else {
         Write-Output "등록됨   : 아니오"
     }
+    # uvicorn 만 찾으면 `python server/app.py` 로 띄운 프라이서를 놓칩니다 -
+    # 실제로 그래서 "안 돌고 있다" 고 잘못 보고했습니다.
     $procs = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
              Where-Object { $_.CommandLine -like "*uvicorn server.app*" -or
+                            $_.CommandLine -like "*serverpp.py*" -or
+                            $_.CommandLine -like "*server/app.py*" -or
                             $_.CommandLine -like "*desk_relay.py*" }
     if ($procs) {
         Write-Output "실행 중  :"
@@ -115,6 +120,13 @@ $action = New-ScheduledTaskAction -Execute "powershell.exe" `
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $trigger.Delay = "PT${DelaySeconds}S"
 
+# 로그온 때 한 번만 돌면, 그 뒤에 프로세스가 죽었을 때 다시 로그인할 때까지
+# 배포본이 기준호가로 남습니다. 실제로 그렇게 됐습니다 - 몇 시간 동안
+# ● BASE 였고 아무도 몰랐습니다. 주기적으로 다시 돌려 스스로 낫게 합니다.
+# desk_autostart.ps1 은 이미 떠 있으면 건너뛰므로 반복해도 해가 없습니다.
+$repeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
+    -RepetitionInterval (New-TimeSpan -Minutes $RepeatMinutes)
+
 # 배터리로 돌더라도 중단하지 않습니다. 노트북에서 화면을 덮으면 중계가 멈추고,
 # 배포본은 조용히 오래된 호가를 들고 있게 됩니다 - 배지가 그걸 알려주긴 하지만
 # 굳이 멈출 이유가 없습니다.
@@ -122,7 +134,7 @@ $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($trigger, $repeat) `
     -Settings $settings -Description "MULTIPRICER: 로컬 프라이서 + 데스크 중계" `
     -Force | Out-Null
 
@@ -130,6 +142,7 @@ Write-Output "등록했습니다: $TaskName"
 Write-Output "  파이썬 : $py"
 Write-Output "  스크립트: $script"
 Write-Output "  시작   : 로그온 후 ${DelaySeconds}초"
+Write-Output "  반복   : ${RepeatMinutes}분마다 (죽어 있으면 다시 띄움)"
 Write-Output ""
 Write-Output "지금 바로 한 번 돌려보려면:"
 Write-Output "  Start-ScheduledTask -TaskName '$TaskName'"

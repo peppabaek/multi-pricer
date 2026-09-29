@@ -471,7 +471,7 @@ def get_market_snapshot(pricing_date: Optional[str] = None, settle_date: Optiona
         "data": {
             "currency": "USD",
             "relay": relay.status("USD"),
-            "source": snapshot["source"],
+            "source": _sourced("USD", snapshot)["source"],
             "status_message": snapshot.get("status_message", "Live"),
             "is_live_connected": snapshot.get("is_live_connected", False),
             "has_app_key": snapshot.get("has_app_key", False),
@@ -547,7 +547,7 @@ def calculate_pricing(req: PricingRequest):
         result["snapshot_info"] = {
             "currency": "USD",
             "curve_type": req.curve_type or "Standard",
-            "source": snapshot.get("source", "LSEG Workspace Tradition Feed"),
+            "source": _sourced("USD", snapshot)["source"],
             "timestamp": snapshot.get("timestamp", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             "pricing_date": curve.pricing_date.strftime("%Y-%m-%d"),
             "settle_date": curve.settle_date.strftime("%Y-%m-%d")
@@ -579,7 +579,7 @@ def reload_and_price_usd(req: PricingRequest):
 
     market_snapshot = {
         "currency": "USD",
-        "source": snapshot.get("source", "LSEG Workspace Tradition Feed"),
+        "source": _sourced("USD", snapshot)["source"],
         "status_message": snapshot.get("status_message", "Live"),
         "is_live_connected": snapshot.get("is_live_connected", False),
         "has_app_key": snapshot.get("has_app_key", False),
@@ -625,6 +625,33 @@ def _relay_feed(currency: str):
             "FWD": kmbc_fwd_feed,
         }
     return _RELAY_FEEDS.get((currency or "USD").upper())
+
+
+# 통화 이름과 중계 키가 다릅니다. 중계는 피드 단위로 기록됩니다.
+_RELAY_KEY_FOR = {"USD": "USD", "KRW": "KRW", "KRW_KOFR": "KOFR",
+                  "KRW_CRS": "CRS", "USD_FWD": "FWD"}
+
+
+def _sourced(currency: str, snap: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    이 호가가 어디서 왔는지 스냅샷이 정확히 말하게 한다.
+
+    피드의 is_live_connected 는 "이 프로세스가 LSEG 에 붙어 있는가" 입니다.
+    클라우드에서는 언제나 거짓이라, 끊긴 것과 같은 취급을 받아 출처가
+    "Baseline (비실시간)" 으로 나갑니다. 그런데 데스크 중계로 들어온 호가는
+    방금 받은 실시간 값입니다 - par 가 데스크와 소수점까지 같습니다.
+
+    기준호가를 실시간이라고 부르는 것만 막으면 절반입니다. 실시간을 기준호가
+    라고 부르면 경고가 늘 켜져 있게 되고, 늘 켜진 경고는 아무도 보지 않습니다.
+    """
+    st = relay.status(_RELAY_KEY_FOR.get((currency or "").upper(), ""))
+    if not (st.get("active") and not st.get("stale")):
+        return snap
+    out = dict(snap)
+    origin = st.get("origin") or "desk"
+    out["source"] = f"데스크 중계 ({origin}) — 실시간"
+    out["is_relayed"] = True
+    return out
 
 
 def _apply_quote(feed, tenor: str, mid: float, bid=None, ask=None) -> bool:
@@ -758,7 +785,7 @@ def get_krw_market_snapshot(pricing_date: Optional[str] = None, settle_date: Opt
         "snapshot_info": {
             "currency": "KRW",
             "relay": relay.status("KRW"),
-            "source": snapshot["source"],
+            "source": _sourced("KRW", snapshot)["source"],
             "status_message": snapshot.get("status_message", "Live"),
             "is_live_connected": snapshot.get("is_live_connected", False),
             "has_app_key": snapshot.get("has_app_key", False),
@@ -833,7 +860,7 @@ def calculate_krw_pricing(req: PricingRequest):
         
         result["snapshot_info"] = {
             "currency": "KRW",
-            "source": snapshot.get("source", "LSEG Workspace KRW Feed"),
+            "source": _sourced("KRW", snapshot)["source"],
             "timestamp": snapshot.get("timestamp", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             "pricing_date": curve.pricing_date.strftime("%Y-%m-%d"),
             "settle_date": curve.settle_date.strftime("%Y-%m-%d")
@@ -865,7 +892,7 @@ def reload_and_price_krw(req: PricingRequest):
         
     market_snapshot = {
         "currency": "KRW",
-        "source": snapshot["source"],
+        "source": _sourced("KRW", snapshot)["source"],
         "status_message": snapshot.get("status_message", "Live"),
         "is_live_connected": snapshot.get("is_live_connected", False),
         "has_app_key": snapshot.get("has_app_key", False),
@@ -935,7 +962,7 @@ def get_kofr_market_snapshot(pricing_date: Optional[str] = None, settle_date: Op
             "currency": "KRW_KOFR",
             "relay": relay.status("KOFR"),
             "generator": "\\KRW KOFR Q 3M",
-            "source": snapshot["source"],
+            "source": _sourced("KRW_KOFR", snapshot)["source"],
             "status_message": snapshot.get("status_message", "Live"),
             "is_live_connected": snapshot.get("is_live_connected", False),
             "has_app_key": snapshot.get("has_app_key", False),
@@ -1013,7 +1040,7 @@ def price_swap_kofr(req: PricingRequest):
         result["snapshot_info"] = {
             "currency": "KRW_KOFR",
             "generator": "\\KRW KOFR Q 3M",
-            "source": snapshot.get("source", "LSEG Workspace KOFR Feed"),
+            "source": _sourced("KRW_KOFR", snapshot)["source"],
             "timestamp": snapshot.get("timestamp", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             "pricing_date": curve.pricing_date.strftime("%Y-%m-%d"),
             "settle_date": curve.settle_date.strftime("%Y-%m-%d")
@@ -1046,7 +1073,7 @@ def reload_and_price_kofr(req: PricingRequest):
     market_snapshot = {
         "currency": "KRW_KOFR",
         "generator": "\\KRW KOFR Q 3M",
-        "source": snapshot.get("source", "LSEG Workspace KOFR Feed"),
+        "source": _sourced("KRW_KOFR", snapshot)["source"],
         "status_message": snapshot.get("status_message", "Live"),
         "is_live_connected": snapshot.get("is_live_connected", False),
         "has_app_key": snapshot.get("has_app_key", False),
@@ -1112,7 +1139,7 @@ def get_crs_market_snapshot(pricing_date: Optional[str] = None, settle_date: Opt
         crs_feed.trigger_on_demand_refresh()
     else:
         _warm_once("crs", crs_feed)
-    snap = crs_feed.get_snapshot()
+    snap = _sourced("KRW_CRS", crs_feed.get_snapshot())
     p_date = parse_date(pricing_date) if pricing_date else datetime.date.today()
     s_date = parse_date(settle_date) if settle_date else get_crs_spot_date(p_date, 2)
     
