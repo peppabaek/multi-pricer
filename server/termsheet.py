@@ -802,6 +802,10 @@ def primary_provider() -> str:
 # limit clears itself, and a daily one should not silently disable a provider for good.
 _PROVIDER_COOLDOWN: Dict[str, float] = {}
 _COOLDOWN_SECONDS = 600
+# 과부하(503)는 한도 소진과 다릅니다. 모델 쪽이 붐빌 뿐이라 몇 분이면 풀리므로
+# 10분을 쉬게 하면 멀쩡한 모델을 오래 버립니다. 다만 쿨다운이 아예 없으면
+# 매번 다시 시도하게 되는데, 그 한 번이 58초였습니다 - 측정값입니다.
+_BUSY_COOLDOWN_SECONDS = 120
 
 # 사다리 전체에 시간 예산을 둡니다.
 #
@@ -939,6 +943,8 @@ def call_extractor(redacted_text: str, model: str = None,
                              "reason": reason or "실패", "detail": str(e)[:200]})
             if reason in ("호출 한도", "잔액 부족"):
                 _PROVIDER_COOLDOWN[f"{n}:{mdl}"] = time.time() + _COOLDOWN_SECONDS
+            elif reason == "서비스 불안정":
+                _PROVIDER_COOLDOWN[f"{n}:{mdl}"] = time.time() + _BUSY_COOLDOWN_SECONDS
             if reason is None:
                 # Not the provider's fault - another model would fail the same way.
                 if demo_mode_enabled():
@@ -1009,6 +1015,8 @@ def call_vision_extractor(raw: bytes, mime: str,
                              "reason": reason or "실패", "detail": str(e)[:200]})
             if reason in ("호출 한도", "잔액 부족"):
                 _PROVIDER_COOLDOWN[f"{n}:{mdl}"] = time.time() + _COOLDOWN_SECONDS
+            elif reason == "서비스 불안정":
+                _PROVIDER_COOLDOWN[f"{n}:{mdl}"] = time.time() + _BUSY_COOLDOWN_SECONDS
             if reason is None:
                 raise
             continue

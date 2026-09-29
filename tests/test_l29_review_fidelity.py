@@ -207,6 +207,60 @@ def t_9():
         raise AssertionError("시한 초과 안내에 경과 시간이 없음")
 
 
+@case("L29-10", "모델 사다리가 측정된 순서대로 서 있다")
+def t_10():
+    """
+    같은 사진, 한 번씩 호출한 실측:
+
+        gemini-3.6-flash        14.8s  정확
+        gemini-3.5-flash-lite    5.2s  정확
+        gemini-3.5-flash        58.1s  503 UNAVAILABLE
+
+    3.5-flash 가 맨 앞에 있어서, 추출할 때마다 58초를 먼저 태우고 사다리를
+    시작했습니다. 연속 업로드 실측이 17.9s / 122.0s / 91.1s 였던 이유입니다.
+    재정렬 뒤 15.2s / 21.6s / 17.7s / 31.9s.
+
+    다시 바꾸려면 다시 재보고 바꾸라는 뜻으로 고정합니다.
+    """
+    saved = os.environ.pop("GEMINI_FALLBACK_MODELS", None)
+    saved_model = os.environ.pop("GEMINI_MODEL", None)
+    try:
+        from server.providers import model_candidates
+        order = model_candidates("gemini")
+        if not order:
+            raise AssertionError("gemini 후보가 비어 있음")
+        if order[0] == "gemini-3.5-flash":
+            raise AssertionError(
+                "503 로 58초를 태우는 모델이 맨 앞 — 매 추출마다 그 값을 냅니다")
+        slow = order.index("gemini-3.5-flash") if "gemini-3.5-flash" in order else 99
+        fast = order.index("gemini-3.6-flash") if "gemini-3.6-flash" in order else 99
+        if fast > slow:
+            raise AssertionError(f"느린 모델이 빠른 모델보다 앞: {order}")
+    finally:
+        if saved is not None:
+            os.environ["GEMINI_FALLBACK_MODELS"] = saved
+        if saved_model is not None:
+            os.environ["GEMINI_MODEL"] = saved_model
+
+
+@case("L29-11", "과부하 모델을 잠깐 쉬게 한다")
+def t_11():
+    # 503 은 쿨다운 대상이 아니었습니다. 그래서 58초짜리 모델을 매 추출마다
+    # 다시 시도했습니다. 한도 소진과 달리 금방 풀리므로 짧게 쉽니다.
+    import server.termsheet as T
+    if not hasattr(T, "_BUSY_COOLDOWN_SECONDS"):
+        raise AssertionError("과부하 쿨다운이 없음")
+    if not (30 <= T._BUSY_COOLDOWN_SECONDS <= 600):
+        raise AssertionError(f"쿨다운이 비현실적: {T._BUSY_COOLDOWN_SECONDS}s")
+    if T._BUSY_COOLDOWN_SECONDS >= T._COOLDOWN_SECONDS:
+        raise AssertionError("과부하를 한도 소진만큼 길게 쉬게 함 — 멀쩡한 모델을 버립니다")
+
+    with io.open(os.path.join(ROOT, "server", "termsheet.py"), encoding="utf-8") as f:
+        src = f.read()
+    if src.count("_BUSY_COOLDOWN_SECONDS") < 3:
+        raise AssertionError("텍스트/이미지 사다리 양쪽에 적용되지 않음")
+
+
 if __name__ == "__main__":
     print("\n=== L29 검토 창 정확도 ===")
     sys.exit(1 if run_all("L29") else 0)

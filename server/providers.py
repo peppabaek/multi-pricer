@@ -32,13 +32,21 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "label": "Google Gemini",
         "key_env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
         "model_env": "GEMINI_MODEL",
-        # Pinned rather than a "-latest" alias: the alias moves under you, and the
-        # aliased model answered 503 while the pinned one was fine. Override with
-        # GEMINI_MODEL when a newer release is worth taking.
-        "default_model": "gemini-3.5-flash",
+        # Pinned rather than a "-latest" alias: the alias moves under you. Which one
+        # leads is a measured choice, not a guess - the same photo, one call each:
+        #
+        #   gemini-3.6-flash        14.8s  정확
+        #   gemini-3.5-flash-lite    5.2s  정확
+        #   gemini-3.5-flash        58.1s  503 UNAVAILABLE
+        #
+        # 3.5-flash used to be the reliable one and led this list; it is now the
+        # overloaded one, and leading with it cost ~58s before the ladder even
+        # started. Re-measure before reordering again. Override with GEMINI_MODEL.
+        "default_model": "gemini-3.6-flash",
         # The free tier meters per model, not per key, so an exhausted model does not
-        # mean an exhausted provider. Tried in order after the default, newest first.
-        "fallback_models": ["gemini-3.6-flash", "gemini-3.5-flash-lite",
+        # mean an exhausted provider. Fastest measured first; the 503-prone one last
+        # so it is a last resort rather than the toll on every extraction.
+        "fallback_models": ["gemini-3.5-flash-lite", "gemini-3.5-flash",
                             "gemini-3.1-flash-lite"],
         "tier_env": "GEMINI_TIER",
         "cost": {"free": "free tier", "paid": "paid"},
