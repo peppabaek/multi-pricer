@@ -181,6 +181,43 @@ def png_bytes(width=1400, height=900) -> bytes:
     return buf.getvalue()
 
 
+def phone_jpeg_bytes(width=4032, height=3024, orientation=None) -> bytes:
+    """
+    갤러리에서 바로 올라온 것 같은 사진.
+
+    화면 캡처 PNG 와는 다릅니다: 4032x3024 는 요즘 폰의 기본 해상도이고, 세로로
+    찍으면 픽셀은 가로로 저장된 채 EXIF 에 회전 표시만 붙습니다(orientation=6).
+    이 두 가지가 실제 업로드에서 처음 만나는 차이입니다.
+    """
+    from PIL import Image
+    # 글자를 읽을 수 있는 크기로 먼저 그린 다음 사진 해상도로 늘립니다.
+    # png_bytes(4032, 3024) 처럼 캔버스만 키우면 기본 비트맵 폰트가 그대로라
+    # 글자가 화면의 5% 짜리 점이 됩니다 - 실제로 term sheet 을 찍은 사진은
+    # 문서가 화면을 가득 채웁니다. 그 차이로 모델이 날짜를 오독했습니다.
+    src = Image.open(io.BytesIO(png_bytes(700, 520))).convert("RGB")
+    img = src.resize((width, height), Image.LANCZOS)
+    buf = io.BytesIO()
+    if orientation:
+        # 최소 EXIF: Orientation(0x0112) 한 항목.
+        exif = Image.Exif()
+        exif[0x0112] = orientation
+        img.save(buf, format="JPEG", quality=92, exif=exif)
+    else:
+        img.save(buf, format="JPEG", quality=92)
+    return buf.getvalue()
+
+
+def heic_bytes(width=3024, height=2268) -> bytes:
+    """아이폰이 기본으로 저장하는 포맷. pillow-heif 가 없으면 건너뜁니다."""
+    import pillow_heif
+    from PIL import Image
+    pillow_heif.register_heif_opener()
+    img = Image.open(io.BytesIO(png_bytes(width, height))).convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="HEIF", quality=90)
+    return buf.getvalue()
+
+
 def scanned_pdf_bytes() -> bytes:
     """A PDF whose only content is an image - no extractable text."""
     from PIL import Image

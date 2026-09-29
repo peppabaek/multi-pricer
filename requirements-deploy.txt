@@ -26,3 +26,4 @@ pypdf
 openpyxl
 pandas
 pillow
+pillow-heif             # 아이폰 사진(HEIC)

@@ -316,10 +316,13 @@ def check_termsheet(browser, base_stub):
     else:
         ok("올리기 전에는 적용 표시 없음")
 
-    from sample_termsheets import pdf
-    path = os.path.join(HERE, "_ts_mobile.pdf")
+    # 요구사항 그대로: 갤러리에 있는 사진 한 장. 텍스트 PDF 가 아닙니다 -
+    # 4032x3024 짜리 폰 사진은 포맷도 크기도 방향도 다르고, 서버에서 vision
+    # 경로로 갑니다.
+    import sample_formats as SF
+    path = os.path.join(HERE, "_ts_mobile.jpg")
     with open(path, "wb") as f:
-        f.write(pdf("TS-B"))
+        f.write(SF.phone_jpeg_bytes(4032, 3024))
     try:
         pg.set_input_files("#ts-file", path)
         try:
@@ -328,7 +331,21 @@ def check_termsheet(browser, base_stub):
             bad("업로드했는데 검토 팝업이 열리지 않음")
             pg.close()
             return
-        ok("업로드 → 검토 팝업 열림")
+        ok("사진 업로드 → 검토 팝업 열림")
+
+        # 모델에 간 것이 손본 사진인지. 원본 그대로 갔다면 실기기에서는
+        # 프로바이더 한도에 걸려 실패합니다.
+        import urllib.request as _u
+        with _u.urlopen(base_stub + "/__stub/last-vision", timeout=30) as r:
+            v = json.loads(r.read())["data"]
+        if not v:
+            bad("사진인데 vision 경로로 가지 않음 — 텍스트로 처리됨")
+        elif bytes(v["magic"][:3]) != b"\xff\xd8\xff" or v["mime"] != "image/jpeg":
+            bad(f"모델에 JPEG 이 가지 않음: mime={v['mime']} magic={v['magic']}")
+        elif v["bytes"] > 4 * 1024 * 1024:
+            bad(f"줄이지 않은 원본이 그대로 감: {v['bytes']/1e6:.1f}MB")
+        else:
+            ok(f"모델에 보정된 사진이 전달됨 ({v['mime']}, {v['bytes']/1024:.0f}KB)")
 
         text = pg.locator("#ts-modal-body").inner_text()
         for want in ("100,000,000", "20,000,000", "상각"):

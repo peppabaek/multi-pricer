@@ -121,7 +121,19 @@ FREQUENCIES = ["1M", "3M", "6M", "12M"]
 # A picture has no words to strip - see needs_vision below.
 IMAGE_TYPES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
                "gif": "image/gif", "bmp": "image/bmp", "webp": "image/webp",
-               "tif": "image/tiff", "tiff": "image/tiff"}
+               "tif": "image/tiff", "tiff": "image/tiff",
+               # 아이폰이 기본으로 저장하는 포맷. 갤러리에서 바로 올리면 이게 옵니다.
+               "heic": "image/heic", "heif": "image/heif", "avif": "image/avif"}
+
+# ISO-BMFF 컨테이너(HEIC/HEIF/AVIF)의 브랜드. 파일 4~8 바이트가 "ftyp" 이고
+# 그 뒤 네 글자가 브랜드입니다.
+_BMFF_IMAGE_BRANDS = frozenset(
+    (b"heic", b"heix", b"heim", b"heis", b"hevc", b"hevm", b"hevs",
+     b"mif1", b"msf1", b"avif", b"avis"))
+
+
+def _is_bmff_image(raw: bytes) -> bool:
+    return len(raw) >= 12 and raw[4:8] == b"ftyp" and raw[8:12] in _BMFF_IMAGE_BRANDS
 
 
 def sniff_kind(raw: bytes, filename: str = "") -> str:
@@ -161,7 +173,7 @@ def sniff_kind(raw: bytes, filename: str = "") -> str:
     if raw[:8] == b"\x89PNG\r\n\x1a\n" or raw[:3] == b"\xff\xd8\xff" \
             or raw[:6] in (b"GIF87a", b"GIF89a") or raw[:2] == b"BM" \
             or raw[:4] in (b"II*\x00", b"MM\x00*") \
-            or (raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"):
+            or (raw[:4] == b"RIFF" and raw[8:12] == b"WEBP")             or _is_bmff_image(raw):
         return "image"
     if ext in IMAGE_TYPES:
         return "image"
@@ -1245,6 +1257,8 @@ def _mime_for(raw: bytes, filename: str = "") -> str:
             return mime
     if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
         return "image/webp"
+    if _is_bmff_image(raw):
+        return "image/avif" if raw[8:12] in (b"avif", b"avis") else "image/heic"
     ext = (filename or "").rsplit(".", 1)[-1].lower()
     return IMAGE_TYPES.get(ext, "image/jpeg")
 
@@ -1330,6 +1344,92 @@ def refusal_is_about_product(reason: Optional[str]) -> bool:
 
 
 # ---------------------------------------------------------------- 7. orchestration
+# 모델에 보내기 전에 사진을 한 번 손본다. 폰 갤러리에서 바로 올라온 파일은
+# 그대로 보내면 세 가지가 어긋납니다.
+#
+#   HEIC   아이폰 기본 포맷. iOS Safari 가 사진 라이브러리에서 고를 때 JPEG 로
+#          바꿔주는 경우가 많지만, 파일 앱에서 고르거나 공유로 받으면 HEIC 그대로
+#          옵니다. 그러면 지금까지는 "읽을 수 있는 내용을 찾지 못했습니다" 라는,
+#          원인과 상관없는 말이 나왔습니다.
+#   회전   세로로 찍은 사진은 픽셀이 가로로 저장되고 EXIF 에 "90도 돌려서 봐라"
+#          라는 표시만 붙습니다. 원본을 그대로 보내면 모델은 누운 표를 봅니다.
+#   크기   요즘 폰 사진은 3~12MB 입니다. 그대로 보내면 느리고 프로바이더의 이미지
+#          한도에 걸립니다. 약정서를 읽는 데 긴 변 2000px 이면 충분합니다.
+_PHOTO_MAX_EDGE = 2000
+_PHOTO_MAX_BYTES = 4 * 1024 * 1024
+
+
+def prepare_photo(raw: bytes, filename: str = "") -> Tuple[bytes, str, List[str]]:
+    """
+    (보낼 바이트, mime, 무슨 손을 봤는지) 를 돌려준다.
+
+    손댈 것이 없으면 원본을 그대로 돌려줍니다 - 화면 캡처 PNG 를 굳이 JPEG 로
+    다시 구워서 글자를 뭉갤 이유가 없습니다.
+    """
+    notes: List[str] = []
+    mime = _mime_for(raw, filename)
+    if sniff_kind(raw, filename) != "image":
+        return raw, mime, notes
+
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return raw, mime, notes
+
+    is_heic = _is_bmff_image(raw)
+    if is_heic:
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            raise ValueError(
+                "HEIC 사진을 읽을 수 없습니다 (pillow-heif 미설치). 아이폰 설정 > "
+                "카메라 > 포맷 을 '높은 호환성'으로 바꾸면 JPEG 로 저장됩니다.")
+
+    try:
+        img = Image.open(io.BytesIO(raw))
+        img.load()
+    except Exception as e:
+        raise ValueError(f"사진을 열지 못했습니다: {e}")
+
+    # EXIF 회전을 픽셀에 실제로 반영하고 그 표시는 떼어냅니다.
+    rotated = ImageOps.exif_transpose(img)
+    turned = rotated is not img and rotated.size != img.size
+    if turned:
+        notes.append("회전 보정")
+    img = rotated
+
+    long_edge = max(img.size)
+    shrunk = long_edge > _PHOTO_MAX_EDGE
+    if shrunk:
+        ratio = _PHOTO_MAX_EDGE / float(long_edge)
+        img = img.resize((max(1, int(img.width * ratio)),
+                          max(1, int(img.height * ratio))), Image.LANCZOS)
+
+    if not (is_heic or shrunk or turned) and len(raw) <= _PHOTO_MAX_BYTES:
+        return raw, mime, notes
+
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+
+    # 한도 안에 들어올 때까지 품질을 낮춥니다. 85 면 표의 숫자는 멀쩡합니다.
+    out = b""
+    for quality in (85, 75, 65, 55):
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        out = buf.getvalue()
+        if len(out) <= _PHOTO_MAX_BYTES:
+            break
+
+    if is_heic:
+        notes.append("HEIC → JPEG")
+    if shrunk:
+        notes.append(f"{long_edge}px → {max(img.size)}px")
+    if len(out) < len(raw):
+        notes.append(f"{len(raw)/1e6:.1f}MB → {len(out)/1e6:.1f}MB")
+    return out, "image/jpeg", notes
+
+
 def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
                       reviewers=None, filename: str = "") -> Dict[str, Any]:
     """
@@ -1365,10 +1465,13 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
     if by_vision:
         # Nothing to strip: there are no words to find the counterparty in, so the file
         # itself is what goes to the model. The caller is told, every time.
-        mime = _mime_for(raw, filename)
+        # 폰에서 바로 올라온 사진을 모델이 읽을 수 있는 모양으로 맞춥니다.
+        photo, mime, photo_notes = prepare_photo(raw, filename)
+        if photo_notes:
+            _log(f"[Termsheet] 사진 보정: {', '.join(photo_notes)}")
         redacted_text, redaction_counts, leaks = "", {}, []
-        trade = extractor(raw) if extractor is not None \
-            else call_vision_extractor(raw, mime, used=used)
+        trade = extractor(photo) if extractor is not None \
+            else call_vision_extractor(photo, mime, used=used)
     else:
         redacted_text, redaction_counts = redact(doc_text)
         leaks = redaction_leaks(redacted_text)

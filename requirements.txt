@@ -16,6 +16,12 @@ eikon
 anthropic
 pypdf
 
+# Document formats. termsheet.py imports these for Excel sheets and for photos
+# and scans; they were missing here, so a fresh clone could not read either.
+openpyxl
+pillow
+pillow-heif             # 아이폰 사진(HEIC)
+
 # Optional second opinion for cross-validation
 google-genai
 # openai

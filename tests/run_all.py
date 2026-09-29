@@ -30,6 +30,7 @@ SUITES = [
     ("L22 Startup log", "test_l22_startup.py"),
     ("L23 LSEG status panel", "test_l23_lseg_status.py"),
     ("L24 Desk relay", "test_l24_relay.py"),
+    ("L25 Phone photo", "test_l25_photo.py"),
 ]
 
 total_fail = 0
