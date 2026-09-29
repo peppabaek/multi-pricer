@@ -5,6 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="color-scheme" content="light">
     <title>MULTIPRICER Mobile</title>
+
+    <!-- 홈 화면에 추가했을 때 주소창 없이 앱처럼 열리도록. iOS 는 manifest 의
+         icons 를 보지 않으므로 apple-touch-icon 이 따로 필요합니다. -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0b1f3f">
+    <link rel="apple-touch-icon" href="/icons/icon-180.png">
+    <link rel="icon" href="/icons/icon-32.png" sizes="32x32">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="MULTIPRICER">
+    <!-- 숫자를 길게 눌렀을 때 iOS 가 전화번호로 인식해 파랗게 칠하는 것을 막습니다. -->
+    <meta name="format-detection" content="telephone=no">
+
     <link rel="stylesheet" href="m.css?v=1">
 </head>
 <body>

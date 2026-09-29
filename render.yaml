@@ -20,7 +20,11 @@ services:
     buildCommand: pip install -r requirements-deploy.txt
     startCommand: uvicorn server.app:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
-    autoDeploy: false        # deploy on purpose, not on every push to main
+    # True because that is what the service actually does. It was false here while
+    # the dashboard deployed on every push anyway, so the file described a policy
+    # nobody was following - and a deploy that "just happened" looked like a fault
+    # rather than the setting working as configured.
+    autoDeploy: true
 
     envVars:
       - key: PYTHON_VERSION

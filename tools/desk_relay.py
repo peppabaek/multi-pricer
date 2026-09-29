@@ -76,6 +76,24 @@ def read_local(local, currency):
     ]
 
 
+def feed_is_live(body):
+    """
+    이 피드가 정말 LSEG 에 붙어 있는가.
+
+    기준호가를 중계하면 클라우드에는 '데스크 중계'로 보이는데 실제로는 아무 근거가
+    없는 숫자가 됩니다 - 아무것도 없는 것보다 나쁩니다. 그래서 확실할 때만 참을
+    돌려줍니다.
+
+    피드마다 이름이 다릅니다: 스왑 피드들은 is_live_connected, FWD 는 is_connected
+    입니다. 한쪽만 보면 살아 있는 FWD 를 미연결로 판정해 조용히 건너뜁니다 -
+    로그에 "미연결" 이라면서 괄호 안에는 "● LIVE" 가 찍히는 모순으로 드러났습니다.
+    """
+    for key in ("is_live_connected", "is_connected"):
+        if key in body:
+            return bool(body[key])
+    return False
+
+
 def push_once(local, target, auth, currencies, origin, dry_run=False):
     stamp = datetime.datetime.now().strftime("%H:%M:%S")
     for cur in currencies:
@@ -92,7 +110,7 @@ def push_once(local, target, auth, currencies, origin, dry_run=False):
         # 로컬이 LSEG 에 실제로 붙어 있지 않으면 보내지 않는다. 기준호가를
         # 중계하면 클라우드에는 '데스크 중계'로 보이는데 실제로는 아무 근거가
         # 없는 숫자가 된다 - 없는 것보다 나쁘다.
-        if not body.get("is_live_connected"):
+        if not feed_is_live(body):
             print(f"  [{stamp}] {cur:5} 로컬이 LSEG 미연결 — 보내지 않음 "
                   f"({body.get('status_message', '')[:40]})")
             continue

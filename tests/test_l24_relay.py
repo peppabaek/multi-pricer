@@ -153,12 +153,53 @@ def t_8():
 def t_9():
     # 기준호가를 중계하면 클라우드에는 '데스크 중계'로 보이는데 실제로는 아무
     # 근거가 없는 숫자다 - 아무것도 없는 것보다 나쁘다.
-    with io.open(os.path.join(ROOT, "tools", "desk_relay.py"), encoding="utf-8") as f:
-        src = f.read()
-    if 'body.get("is_live_connected")' not in src:
-        raise AssertionError("에이전트가 로컬 연결 상태를 확인하지 않음")
-    if "보내지 않음" not in src:
-        raise AssertionError("미연결 시 전송을 멈추는 경로가 없음")
+    #
+    # 전에는 소스에 특정 문자열이 있는지만 봤다. 문자열은 그대로인데 필드 이름이
+    # 맞지 않아 실제로는 건너뛰던 결함(L24-9b)을 그래서 놓쳤다. 이제 실제로
+    # 보내는지 본다.
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import importlib
+    dr = importlib.import_module("desk_relay")
+
+    quotes = [{"tenor": "5Y", "mid": 4.5, "bid": None, "ask": None}]
+    pushed = []
+    saved_read, saved_call = dr.read_local, dr.call
+    dr.call = lambda url, body=None, auth=None, **kw: pushed.append(url) or {"data": {}}
+    try:
+        dr.read_local = lambda local, cur: ({"is_live_connected": False,
+                                             "status_message": "기준호가"}, quotes)
+        dr.push_once("http://x", "http://y", None, ["USD"], "desk-t")
+        if pushed:
+            raise AssertionError(f"미연결인데 전송함: {pushed}")
+
+        dr.read_local = lambda local, cur: ({"is_live_connected": True}, quotes)
+        dr.push_once("http://x", "http://y", None, ["USD"], "desk-t")
+        if not pushed:
+            raise AssertionError("연결돼 있는데 전송하지 않음")
+    finally:
+        dr.read_local, dr.call = saved_read, saved_call
+
+
+@case("L24-9b", "피드마다 다른 연결 필드 이름을 모두 읽는다")
+def t_9b():
+    # 소스를 grep 하는 L24-9 만으로는 부족했다. 문자열은 그대로 있는데, FWD 만
+    # 이 값을 is_connected 라고 불러서 살아 있는 피드가 조용히 건너뛰어졌다.
+    # 로그에는 "미연결" 이라면서 괄호 안에 "● LIVE" 가 찍혔다.
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import importlib
+    dr = importlib.import_module("desk_relay")
+
+    cases = [
+        ({"is_live_connected": True}, True, "스왑 피드 연결됨"),
+        ({"is_live_connected": False}, False, "스왑 피드 미연결"),
+        ({"is_connected": True}, True, "FWD 연결됨"),
+        ({"is_connected": False}, False, "FWD 미연결"),
+        ({}, False, "알 수 없으면 보내지 않는다"),
+    ]
+    for body, want, why in cases:
+        got = dr.feed_is_live(body)
+        if got != want:
+            raise AssertionError(f"{why}: {body} → {got}, 기대 {want}")
 
 
 @case("L24-10", "에이전트가 App Key 를 밖으로 내보내지 않는다")
