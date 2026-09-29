@@ -32,6 +32,8 @@ SUITES = [
     ("L24 Desk relay", "test_l24_relay.py"),
     ("L25 Phone photo", "test_l25_photo.py"),
     ("L26 Home screen install", "test_l26_mobile_install.py"),
+    ("L27 Result provenance", "test_l27_provenance.py"),
+    ("L28 Eikon log files", "test_l28_eikon_logs.py"),
 ]
 
 total_fail = 0

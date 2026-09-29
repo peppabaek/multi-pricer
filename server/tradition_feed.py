@@ -232,7 +232,13 @@ class TraditionMarketFeed:
             snap_time = datetime.datetime.now()
             quote_list = [dict(v) for v in self.quotes.values()]
             return {
-                "source": "LSEG Workspace (Tradeweb Composite =TWEB)",
+                # 연결이 끊긴 상태에서도 이 문자열이 그대로 나가면, 트레이더가
+                # 카운터파티에 보내는 RFQ 회신문에 "LSEG Tradeweb 기준" 이라고
+                # 찍힙니다. 실제로는 하드코딩된 기준호가입니다. krw_feed 와
+                # kofr_feed 는 이미 이렇게 구분하고 있었습니다.
+                "source": ("LSEG Workspace (Tradeweb Composite =TWEB)"
+                           if self.is_lseg_live_connected
+                           else "Tradeweb Composite Baseline (비실시간)"),
                 "status_message": self.lseg_status_message,
                 "is_live_connected": self.is_lseg_live_connected,
                 "has_app_key": bool(self.app_key),

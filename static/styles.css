@@ -2956,3 +2956,29 @@ select:focus {
    the trade panel's own buttons already cover these three actions. mobile.css
    turns it on inside its phone media query. */
 .mobile-actions { display: none; }
+
+/* 결과가 무엇으로 계산됐는지. 헤더 배지 하나만으로는 트레이더가 결과를 보는
+   동안 시야에 없습니다 - 기준호가로 계산된 4.24 를 시장가로 읽는 것을 막는
+   마지막 장치입니다. */
+.result-source-badge {
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .4px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1.5px solid transparent;
+    white-space: nowrap;
+}
+.result-source-badge[hidden] { display: none; }
+.result-source-badge.live  { background: #dcfce7; border-color: #86efac; color: #15803d; }
+.result-source-badge.relay { background: #e0f2fe; border-color: #7dd3fc; color: #0369a1; }
+.result-source-badge.base  { background: #fef3c7; border-color: #fcd34d; color: #b45309; }
+
+/* 기준호가로 계산된 숫자는 살아 있는 값처럼 보이면 안 됩니다. 지우지는
+   않습니다 - 방금 본 값을 잃는 것도 곤란합니다. */
+.panel-results.not-live .hero-val,
+.panel-results.not-live .delta-val {
+    color: #94a3b8 !important;
+}
+.panel-results.not-live { border-color: #fcd34d; }

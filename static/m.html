@@ -91,6 +91,35 @@
         </label>
     </div>
 
+    <!-- 평소엔 접어둡니다. 휴대폰에서 대부분의 거래는 바닐라이고, 이 칸들이
+         펼쳐져 있으면 자주 쓰는 입력이 화면 밖으로 밀립니다. -->
+    <details class="m-more" id="adv-block">
+        <summary>고급 옵션 <span class="m-adv-tag" id="adv-tag" hidden></span></summary>
+        <div>
+            <label class="m-field" id="row-curve">
+                <span>커브 모델</span>
+                <select id="in-curve">
+                    <option value="Standard">Standard (Linear ZC)</option>
+                    <option value="Advanced">Advanced (Hybrid Spline)</option>
+                </select>
+            </label>
+            <label class="m-field" id="row-crs-type" hidden>
+                <span>CRS 유형</span>
+                <select id="in-crs-type">
+                    <option value="Vanilla">Vanilla (Fix vs Float)</option>
+                    <option value="Fixed-Fixed">Fixed - Fixed</option>
+                </select>
+            </label>
+            <label class="m-field" id="row-usd-coupon" hidden>
+                <span>USD 고정금리 (%)</span>
+                <input type="text" inputmode="decimal" id="in-usd-coupon" value="3.5000">
+            </label>
+        </div>
+        <p class="m-hint" id="adv-hint">스케줄 직접 편집은 PC 버전에서 하세요 —
+            탭 구분 표 붙여넣기는 휴대폰에서 다루기 어렵습니다. Term Sheet 사진을
+            올리면 상각 스케줄은 그대로 반영됩니다.</p>
+    </details>
+
     <details class="m-more" id="date-block">
         <summary>개시일 · 만기일 직접 지정</summary>
         <div class="m-pair">

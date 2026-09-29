@@ -110,7 +110,9 @@ class CRSFeed:
         with self._lock:
             now_ts = self.last_update.strftime("%Y-%m-%d %H:%M:%S")
             return {
-                "source": "LSEG Workspace (Prebon KRUSQ CRS Feed)",
+                "source": ("LSEG Workspace (Prebon KRUSQ CRS Feed)"
+                           if self.is_connected
+                           else "Prebon KRUSQ CRS Baseline (비실시간)"),
                 "status_message": self.status_message,
                 "is_connected": self.is_connected,
                 "is_live_connected": self.is_connected,

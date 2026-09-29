@@ -48,15 +48,26 @@
     function readResults(currency, data) {
         const pr = (data && data.pricing_results) || {};
         if (currency === "KRW_CRS") {
+            // Fixed-Fixed 에서는 par 가 "USD 쿠폰을 주었을 때의 KRW 고정금리"
+            // 입니다. PC 화면의 복사문과 같은 필드를 씁니다.
+            const fixedFixed = pr.par_usd_rate_pct !== null
+                            && pr.par_usd_rate_pct !== undefined;
+            const extra = [
+                { label: "USD DV01", value: pr.usd_dv01, ccy: "USD" },
+                { label: "USD NPV", value: pr.deal_npv_usd, ccy: "USD" },
+            ];
+            if (fixedFixed) {
+                extra.unshift({ label: "USD 고정금리", value: pr.par_usd_rate_pct,
+                                pct: true });
+            }
             return {
-                par: pr.par_crs_rate_pct,
+                par: fixedFixed ? pr.par_krw_rate_pct : pr.par_crs_rate_pct,
+                parNote: fixedFixed ? "USD 쿠폰 기준 KRW 고정금리" : "",
+                _unused: pr.par_crs_rate_pct,
                 spreadBp: pr.spread_vs_coupon_bp,
                 npv: pr.deal_npv_krw, npvCcy: "KRW",
                 dv01: pr.krw_dv01, dv01Ccy: "KRW",
-                extra: [
-                    { label: "USD DV01", value: pr.usd_dv01, ccy: "USD" },
-                    { label: "USD NPV", value: pr.deal_npv_usd, ccy: "USD" },
-                ],
+                extra: extra,
             };
         }
         const ccy = PRODUCTS[currency] ? PRODUCTS[currency].ccy : "USD";
@@ -89,7 +100,16 @@
         if (coupon !== null) req.fixed_coupon_pct = coupon;
         if (state.effectiveDate) req.effective_date = state.effectiveDate;
         if (state.maturityDate) req.maturity_date = state.maturityDate;
-        if (state.currency === "KRW_CRS") req.crs_swap_type = state.crsSwapType || "Vanilla";
+        if (state.curveType) req.curve_type = state.curveType;
+        if (state.currency === "KRW_CRS") {
+            req.crs_swap_type = state.crsSwapType || "Vanilla";
+            // Fixed-Fixed 는 USD 다리도 고정이라, 그 쿠폰이 없으면 서버가 기본값
+            // 3.50 으로 계산하고 화면은 아무 말도 하지 않습니다.
+            if (req.crs_swap_type === "Fixed-Fixed") {
+                const u = numOrNull(state.usdFixedCoupon);
+                if (u !== null) req.usd_fixed_coupon_pct = u;
+            }
+        }
         return Object.assign(req, state.overrides || {});
     }
 

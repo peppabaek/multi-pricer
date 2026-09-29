@@ -410,6 +410,73 @@ def check_termsheet(browser, base_stub):
         pg.close()
 
 
+def check_advanced(page, base):
+    """
+    고급 옵션 — CRS Fixed-Fixed 와 커브 모델.
+
+    모바일이 CRS 를 Vanilla 로 고정하고 있었습니다. 네 통화 중 하나가 실제로
+    거래되는 형태를 못 내는 것이고, 화면은 그 사실을 말하지 않았습니다.
+
+    여기서도 화면이 스스로 옳다고 말하게 두지 않습니다: 같은 조건을 API 에
+    직접 보내 숫자를 대조합니다.
+    """
+    page.goto(base + "/m", wait_until="load", timeout=120000)
+    page.wait_for_timeout(6000)
+
+    # CRS 가 아닐 때 CRS 칸이 보이면, 눌러도 아무 일이 없는 칸이 됩니다.
+    page.locator("#adv-block summary").click()
+    page.wait_for_timeout(500)
+    if page.locator("#row-crs-type").is_visible():
+        bad("USD 인데 CRS 유형 칸이 보임")
+    else:
+        ok("통화에 맞는 칸만 보임")
+
+    page.locator("#tab-krw-crs").click()
+    page.wait_for_timeout(8000)
+    if not page.locator("#row-crs-type").is_visible():
+        bad("CRS 인데 유형 칸이 없음 — Vanilla 로 고정됨")
+        return
+    ok("CRS 에서 유형 칸이 나타남")
+
+    page.select_option("#in-crs-type", "Fixed-Fixed")
+    page.wait_for_timeout(8000)
+
+    if not page.locator("#row-usd-coupon").is_visible():
+        bad("Fixed-Fixed 인데 USD 고정금리 칸이 없음 — 서버 기본값 3.50 으로 "
+            "계산되고 화면은 아무 말도 하지 않습니다")
+    else:
+        ok("Fixed-Fixed 에서 USD 고정금리 칸이 나타남")
+
+    tag = page.locator("#adv-tag")
+    if not tag.count() or not tag.is_visible() or "Fixed-Fixed" not in tag.inner_text():
+        bad("고급 옵션을 접으면 Fixed-Fixed 인지 알 수 없음")
+    else:
+        ok(f"접힌 상태 표시: {tag.inner_text().strip()}")
+
+    shown_par = unformat(page.locator("#out-par").inner_text())
+    want = api("/api/crs/price", {
+        "currency": "KRW_CRS", "notional": 100000000.0, "position": "Pay Fixed",
+        "tenor": "5Y", "spread_bp": 0.0, "crs_swap_type": "Fixed-Fixed",
+        "usd_fixed_coupon_pct": 3.5, "curve_type": "Standard"})
+    want_par = want["pricing_results"].get("par_krw_rate_pct")
+    if shown_par is None or want_par is None:
+        bad(f"Fixed-Fixed par 를 읽지 못함: 화면={shown_par} API={want_par}")
+    elif abs(shown_par - want_par) > 5e-4:
+        bad(f"Fixed-Fixed par 가 API 와 다름 — 화면={shown_par} API={want_par}")
+    else:
+        ok(f"Fixed-Fixed par {shown_par} — API 와 일치")
+
+    # 바닐라와 값이 같으면 유형이 요청에 실리지 않은 것입니다.
+    page.select_option("#in-crs-type", "Vanilla")
+    page.wait_for_timeout(8000)
+    vanilla_par = unformat(page.locator("#out-par").inner_text())
+    if vanilla_par is not None and shown_par is not None and abs(vanilla_par - shown_par) < 1e-6:
+        bad(f"Vanilla 와 Fixed-Fixed 의 par 가 같음 ({vanilla_par}) — 유형이 "
+            f"요청에 반영되지 않음")
+    else:
+        ok(f"유형이 반영됨: Fixed-Fixed {shown_par} vs Vanilla {vanilla_par}")
+
+
 def main():
     env = dict(os.environ, PRICER_NO_LOCAL_FEED="1")
     srv = subprocess.Popen(
@@ -443,6 +510,11 @@ def main():
             print("\n--- 레이아웃 ---")
             pg = browser.new_page(viewport=PHONE, is_mobile=True, has_touch=True)
             check_layout(pg, base)
+            pg.close()
+
+            print("\n--- 고급 옵션 (CRS Fixed-Fixed · 커브 모델) ---")
+            pg = browser.new_page(viewport=PHONE, is_mobile=True, has_touch=True)
+            check_advanced(pg, base)
             pg.close()
 
             print("\n--- 라우팅 ---")

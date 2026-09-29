@@ -28,6 +28,8 @@
         effectiveDate: "",
         maturityDate: "",
         crsSwapType: "Vanilla",
+        curveType: "Standard",
+        usdFixedCoupon: "3.5000",
         overrides: null,      // Term Sheet 에서 온 컨벤션 + 스케줄
         tsSummary: "",        // 무엇이 적용됐는지 사람이 읽을 한 줄
         priced: null,         // 마지막 결과
@@ -88,6 +90,24 @@
             const el = document.querySelector('[data-tenor="' + t + '"]');
             if (el) el.classList.toggle("on", t === state.tenor && !state.maturityDate);
         });
+        // 통화마다 의미 있는 칸이 다릅니다. CRS 가 아닐 때 CRS 유형을 보여주면
+        // 눌러도 아무 일이 없는 칸이 됩니다.
+        const isCrs = state.currency === "KRW_CRS";
+        const fixedFixed = isCrs && state.crsSwapType === "Fixed-Fixed";
+        $("row-crs-type").hidden = !isCrs;
+        $("row-usd-coupon").hidden = !fixedFixed;
+        // 커브 모델은 USD SOFR 와 CRS 에만 걸립니다.
+        $("row-curve").hidden = !(state.currency === "USD" || isCrs);
+
+        // 접어두면 무엇이 켜져 있는지 안 보입니다. Fixed-Fixed 로 계산해놓고
+        // 바닐라 가격이라고 믿는 것이 여기서 가장 비싼 실수입니다.
+        const flags = [];
+        if (fixedFixed) flags.push("Fixed-Fixed");
+        if (state.curveType === "Advanced" && !$("row-curve").hidden) flags.push("Advanced");
+        const tag = $("adv-tag");
+        tag.hidden = flags.length === 0;
+        tag.textContent = flags.join(" · ");
+
         const applied = Boolean(state.overrides);
         $("ts-applied").hidden = !applied;
         if (applied) $("ts-applied-text").textContent = state.tsSummary;
@@ -113,9 +133,12 @@
         $("out-par").classList.toggle("empty", r.par === null || r.par === undefined);
 
         const sp = r.spreadBp;
-        $("out-spread").textContent =
-            (sp === null || sp === undefined) ? ""
+        const spTxt = (sp === null || sp === undefined) ? ""
             : "Spread vs Cpn: " + (sp >= 0 ? "+" : "") + Number(sp).toFixed(2) + " bp";
+        // Fixed-Fixed 의 par 는 "USD 쿠폰을 주었을 때의 KRW 고정금리" 입니다.
+        // 라벨이 같으면 바닐라 par 와 구분되지 않습니다.
+        $("out-spread").textContent = r.parNote ? (r.parNote + (spTxt ? " · " + spTxt : ""))
+                                                : spTxt;
 
         $("out-npv").textContent = C.money(r.npv, r.npvCcy);
         $("out-dv01").textContent = C.money(r.dv01, r.dv01Ccy);
@@ -125,7 +148,8 @@
             extra.innerHTML = "";
             r.extra.forEach((e) => {
                 const s = document.createElement("span");
-                s.textContent = e.label + "  " + C.money(e.value, e.ccy);
+                s.textContent = e.label + "  "
+                    + (e.pct ? C.pct(e.value) + " %" : C.money(e.value, e.ccy));
                 extra.appendChild(s);
             });
             extra.hidden = false;
@@ -133,8 +157,11 @@
             extra.hidden = true;
         }
 
+        // 무엇으로 계산했는지 숫자 바로 밑에 씁니다. 헤더 배지는 스크롤하면
+        // 사라지지만 트레이더가 읽는 것은 이 숫자입니다.
         const snap = (state.priced.snapshot_info || {});
         const bits = [];
+        if (snap.source) bits.push(snap.source);
         if (snap.timestamp) bits.push("호가 " + snap.timestamp);
         if (snap.settle_date) bits.push("settle " + snap.settle_date);
         $("out-stamp").textContent = bits.join(" · ");
@@ -205,6 +232,9 @@
         state.spreadBp = $("in-spread").value;
         state.effectiveDate = $("in-eff").value || "";
         state.maturityDate = $("in-mat").value || "";
+        state.curveType = $("in-curve").value;
+        state.crsSwapType = $("in-crs-type").value;
+        state.usdFixedCoupon = $("in-usd-coupon").value;
     }
 
     async function price(reload) {
@@ -445,6 +475,10 @@
         $("btn-price").addEventListener("click", () => price(false));
         $("btn-reload").addEventListener("click", () => price(true));
         $("feed-badge").addEventListener("click", () => { toast("시세 상태 확인 중…"); pollFeed(); });
+
+        ["in-curve", "in-crs-type", "in-usd-coupon"].forEach((id) => {
+            $(id).addEventListener("change", () => { readForm(); paintInputs(); price(false); });
+        });
 
         $("ts-btn").addEventListener("click", () => $("ts-file").click());
         $("ts-file").addEventListener("change", (e) => uploadTermsheet(e.target.files[0]));

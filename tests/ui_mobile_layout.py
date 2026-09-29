@@ -71,6 +71,11 @@ CLIPPED = """() => {
   document.querySelectorAll('body *').forEach(el => {
     const r = el.getBoundingClientRect();
     if (!(r.width > 0 && r.right > vw + 1)) return;
+    // 움직이는 중인 요소는 제외합니다. 토스트는 translateX(100%) 에서 미끄러져
+    // 들어오므로 0.2초 동안 화면 밖에 있습니다 - 그 순간을 재면 레이아웃이
+    // 깨진 것처럼 보이지만, 멈추면 제자리입니다.
+    if (el.getAnimations && el.getAnimations().some(function (an) {
+            return an.playState === 'running'; })) return;
     let a = el.parentElement;
     while (a && a !== document.body) {
       const ov = getComputedStyle(a).overflowX;
@@ -114,6 +119,22 @@ COVERED = """() => {
   return out;
 }"""
 
+def settle(page, timeout_ms=6000):
+    """
+    측정 전에 화면이 멎기를 기다린다.
+
+    토스트는 translateX(100%) 에서 미끄러져 들어와 몇 초 뒤 사라집니다. 그 사이를
+    재면 화면 밖에 있는 것이 레이아웃 결함으로 잡힙니다 - 실제로 320px 검사가
+    간헐적으로 실패했습니다. 애니메이션 제외만으로는 경계 순간이 남습니다.
+    """
+    waited = 0
+    while waited < timeout_ms:
+        if page.locator(".toast").count() == 0:
+            return
+        page.wait_for_timeout(250)
+        waited += 250
+
+
 def col_count(page):
     css = page.evaluate(
         "() => getComputedStyle(document.querySelector('.terminal-grid')).gridTemplateColumns")
@@ -131,6 +152,7 @@ def check_phone(page, base):
     else:
         ok(f"가로 넘침 없음 — 뷰포트 {vw}px == 문서 {doc}px")
 
+    settle(page)
     clipped = page.evaluate(CLIPPED)
     if clipped:
         bad(f"스크롤할 수 없는 곳으로 잘린 요소 {len(clipped)}건: {clipped[:5]}")
@@ -273,6 +295,7 @@ def sweep(browser, base):
         pg = browser.new_page(viewport={"width": w, "height": h})
         pg.goto(base + PC_VIEW, wait_until="load", timeout=120000)
         pg.wait_for_timeout(2500)
+        settle(pg)
         vw, doc = pg.evaluate(
             "() => [document.documentElement.clientWidth, document.documentElement.scrollWidth]")
         clipped = [c for c in pg.evaluate(CLIPPED)

@@ -1218,6 +1218,46 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    /**
+     * 지금 화면의 숫자가 무엇으로 계산됐는가.
+     *
+     * 헤더 배지와 같은 판정을 쓰되, 결과 패널과 메신저 복사문까지 같은 답을
+     * 보게 합니다. 전에는 복사문이 출처를 모를 때 'LSEG Live' 를 기본값으로
+     * 찍었습니다 - 모르면 실시간이라고 주장한 셈이고, 그 문구가 그대로
+     * 카운터파티에게 갔습니다.
+     */
+    function resultProvenance() {
+        const live = Boolean(state.marketSnapshot && state.marketSnapshot.is_live_connected);
+        const relaying = Boolean(lastRelay && lastRelay.active && !lastRelay.stale);
+        const src = (state.marketSnapshot && state.marketSnapshot.source) || "";
+        if (live) {
+            return { kind: "live", label: "● LIVE", realtime: true,
+                     source: src || "LSEG Workspace" };
+        }
+        if (relaying) {
+            const age = Math.round(lastRelay.age_seconds || 0);
+            return { kind: "relay", label: `● RELAY (${age}s)`, realtime: true,
+                     source: `데스크 중계 ${lastRelay.origin || ""} · ${src}`.trim() };
+        }
+        return { kind: "base", label: "● BASE (비실시간)", realtime: false,
+                 source: src || "기준호가 (비실시간)" };
+    }
+
+    function paintResultProvenance() {
+        const p = resultProvenance();
+        const badge = document.getElementById("result-source-badge");
+        if (badge) {
+            badge.hidden = false;
+            badge.textContent = p.label;
+            badge.className = "result-source-badge " + p.kind;
+            badge.title = p.realtime
+                ? `실시간 근거: ${p.source}`
+                : `실시간 피드 없음 — 기준호가로 계산된 값입니다 (${p.source})`;
+        }
+        const panel = document.querySelector(".panel-results");
+        if (panel) panel.classList.toggle("not-live", !p.realtime);
+    }
+
     function setResultsStale(isStale, age) {
         const banner = document.getElementById("results-stale-banner");
         if (!banner) return;
@@ -4571,8 +4611,26 @@ document.addEventListener("DOMContentLoaded", () => {
             text += `Weighted Avg SP:     ${data.weighted_avg_sp.toFixed(2)} 원 (Margin: ${data.default_margin_bp} bp)\n`;
         text += `-----------------------------------------------------------------------------------------\n`;
 
+        // \uc2a4\uc651 \ucabd\uacfc \uac19\uc740 \uaddc\uce59. \uc5ec\uae30\ub294 \ucd9c\ucc98\ub97c \uac70\uc9d3\uc73c\ub85c \ub9d0\ud558\uc9c0\ub294 \uc54a\uc558\uc9c0\ub9cc \uc544\ubb34
+        // \ub9d0\ub3c4 \ud558\uc9c0 \uc54a\uc544, \uae30\uc900\ud638\uac00\ub85c \ubf51\uc740 \uc2a4\uc651\ud3ec\uc778\ud2b8\uac00 \uc544\ubb34 \ud45c\uc2dc \uc5c6\uc774 \ub098\uac14\uc2b5\ub2c8\ub2e4.
+        const fprov = resultProvenance();
+        text += `Source: ${fprov.source}\n`;
+        if (!fprov.realtime) {
+            text = `[\u26a0 \ube44\uc2e4\uc2dc\uac04 \u00b7 \uae30\uc900\ud638\uac00 \uae30\ubc18 \u2014 \ucc38\uace0\uc6a9]\n` + text
+                 + `\u26a0 \uc2e4\uc2dc\uac04 \uc2dc\uc138\uac00 \uc544\ub2d9\ub2c8\ub2e4. \uccb4\uacb0 \uc804 \uc7ac\ud655\uc778 \ud544\uc694.\n`;
+            if (!window.confirm(
+                    "\uc2e4\uc2dc\uac04 \uc2dc\uc138\uac00 \uc544\ub2d9\ub2c8\ub2e4 \u2014 \uae30\uc900\ud638\uac00\ub85c \uacc4\uc0b0\ub41c \uac12\uc785\ub2c8\ub2e4.\n\n" +
+                    "\uadf8\ub300\ub85c \ubcf5\uc0ac\ud558\uba74 '\ube44\uc2e4\uc2dc\uac04' \ud45c\uc2dc\uac00 \ud568\uaed8 \ubd99\uc2b5\ub2c8\ub2e4.\n\uacc4\uc18d\ud560\uae4c\uc694?")) {
+                showToast("\ubcf5\uc0ac\ub97c \ucde8\uc18c\ud588\uc2b5\ub2c8\ub2e4", "info");
+                return;
+            }
+        }
+
         navigator.clipboard.writeText(text).then(() => {
-            showToast("\u2713 Copied Quote table to Clipboard for Messenger!", "success");
+            showToast(fprov.realtime
+                ? "\u2713 Copied Quote table to Clipboard for Messenger!"
+                : "\ubcf5\uc0ac\ub428 \u2014 \ube44\uc2e4\uc2dc\uac04 \ud45c\uc2dc\uac00 \ubd99\uc5c8\uc2b5\ub2c8\ub2e4",
+                fprov.realtime ? "success" : "warning");
         }).catch(err => {
             console.error("Clipboard copy failed:", err);
             showToast("Clipboard copy failed. Please copy manually.", "warning");
@@ -5152,11 +5210,28 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         text += `\u25B8 Deal NPV: ${formatCurrency(dealNpv, isKrw)}\n`;
         text += `\u25B8 DV01 / PV01: ${formatCurrency(dv01, isKrw)} / bp\n`;
-        text += `▸ 산출시각: ${activeTicket.lastCalculatedAt || new Date().toLocaleTimeString()} (${state.marketSnapshot?.source || 'LSEG Live'})\n`;
+        // 출처를 모를 때 'LSEG Live' 를 기본값으로 쓰고 있었습니다. 모르면
+        // 실시간이라고 주장한 셈이고, 그 문구가 그대로 카운터파티에게 갔습니다.
+        const prov = resultProvenance();
+        text += `▸ 산출시각: ${activeTicket.lastCalculatedAt || new Date().toLocaleTimeString()} (${prov.source})\n`;
         text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+        if (!prov.realtime) {
+            // 맨 앞에도 붙입니다. 메신저에서는 첫 줄만 보고 넘기는 일이 흔합니다.
+            text = `[⚠ 비실시간 · 기준호가 기반 — 참고용]\n` + text
+                 + `\n⚠ 실시간 시세가 아닙니다. 체결 전 재확인 필요.`;
+        }
 
+        if (!prov.realtime && !window.confirm(
+                "실시간 시세가 아닙니다 — 기준호가로 계산된 값입니다.\n\n" +
+                "그대로 복사하면 '비실시간' 표시가 함께 붙습니다.\n계속할까요?")) {
+            showToast("복사를 취소했습니다", "info");
+            return;
+        }
         navigator.clipboard.writeText(text).then(() => {
-            showToast("메신저용 호가 정보가 클립보드에 복사되었습니다", "success");
+            showToast(prov.realtime
+                ? "메신저용 호가 정보가 클립보드에 복사되었습니다"
+                : "복사됨 — 비실시간 표시가 붙었습니다",
+                prov.realtime ? "success" : "warning");
         }).catch(err => {
             console.error("Clipboard copy error:", err);
             showToast("클립보드 복사 실패", "warning");
@@ -5249,6 +5324,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         refreshStaleness();
         tickFeedBadge();
+        paintResultProvenance();
     }, 1000);
 
     // 중계는 데스크가 30초마다 보낸다. 그보다 촘촘히 확인할 이유는 없다.
