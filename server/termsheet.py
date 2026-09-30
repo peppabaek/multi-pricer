@@ -88,6 +88,23 @@ def extraction_status() -> Dict[str, Any]:
         "second_pending": bool(second and second in PROVIDERS and not is_available(second)),
         "providers": describe(),
     }
+
+    # 사다리를 밖에서도 볼 수 있어야 합니다.
+    #
+    # 배포본에 Groq 키를 넣고도 그것이 실제로 붙었는지 확인할 방법이 없었습니다.
+    # 이 응답은 1차 프로바이더만 말했고, 폴백이 살아 있는지는 Gemini 가 죽는
+    # 날에야 알게 됩니다 - 알고 싶지 않은 때에.
+    from server.providers import supports_vision, model_candidates
+    chain = extraction_chain()
+    out["chain"] = chain
+    out["vision_chain"] = [n for n in chain if supports_vision(n)]
+    out["fallback_ready"] = len(chain) > 1
+    out["vision_fallback_ready"] = len(out["vision_chain"]) > 1
+    out["ladder"] = [
+        {"provider": n, "label": PROVIDERS[n]["label"],
+         "vision": supports_vision(n), "models": model_candidates(n)}
+        for n in chain
+    ]
     if not ready:
         if not known:
             out["reason"] = f"TERMSHEET_PROVIDER={primary!r} 는 지원하지 않습니다"
