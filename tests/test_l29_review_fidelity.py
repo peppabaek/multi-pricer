@@ -261,6 +261,29 @@ def t_11():
         raise AssertionError("텍스트/이미지 사다리 양쪽에 적용되지 않음")
 
 
+@case("L29-12", "폴백 차선이 빠른 모델로 서 있다")
+def t_12():
+    """
+    폴백의 존재 이유는 Gemini 가 503 을 낼 때 빨리 답하는 것입니다. 거기에
+    2024년 Sonnet 3.5 를 두고 있었습니다 - 느린 차선은 차선이 아닙니다.
+
+    이 계정에서 쓸 수 있는 모델 목록에 claude-haiku-4-5 와 claude-sonnet-5 가
+    있는 것을 확인하고 골랐습니다.
+    """
+    saved = os.environ.pop("ANTHROPIC_MODEL", None)
+    try:
+        from server.providers import model_candidates
+        first = model_candidates("anthropic")[0]
+        if "3-5-sonnet" in first or "3-opus" in first or "3-haiku" in first:
+            raise AssertionError(f"폴백 1순위가 구형 모델: {first}")
+        if "haiku" not in first:
+            raise AssertionError(
+                f"폴백 1순위가 빠른 모델이 아님: {first} — 차선은 속도가 값어치입니다")
+    finally:
+        if saved is not None:
+            os.environ["ANTHROPIC_MODEL"] = saved
+
+
 if __name__ == "__main__":
     print("\n=== L29 검토 창 정확도 ===")
     sys.exit(1 if run_all("L29") else 0)

@@ -23,7 +23,12 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "label": "Anthropic Claude",
         "key_env": ["ANTHROPIC_API_KEY"],
         "model_env": "ANTHROPIC_MODEL",
-        "default_model": "claude-3-5-sonnet-20241022",
+        # Haiku 4.5 는 이 계정에서 쓸 수 있는 모델 중 가장 빠르면서 이미지를
+        # 읽습니다. 2024년 Sonnet 3.5 를 기본으로 두고 있었는데, 폴백 차선은
+        # Gemini 가 503 을 낼 때 빨리 답하는 것이 존재 이유라 느린 모델을 둘
+        # 이유가 없습니다. Sonnet 5 는 더 정확할 때를 위해 뒤에 둡니다.
+        "default_model": "claude-haiku-4-5-20251001",
+        "fallback_models": ["claude-sonnet-5"],
         "cost": "paid",
         "data_policy": "학습 미사용 (API 기본), 30일 보존 · ZDR 설정 가능",
         "signup": "https://console.anthropic.com/settings/keys",
