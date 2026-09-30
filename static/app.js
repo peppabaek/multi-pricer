@@ -1341,7 +1341,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 <td style="font-size:10px; color:var(--text-secondary); font-weight:600;">${q.ric}</td>
                 <td class="num">${q.bid ? q.bid.toFixed(4) : "-"}</td>
                 <td class="num">${q.ask ? q.ask.toFixed(4) : "-"}</td>
-                <td class="num"><strong class="editable-rate">${q.mid.toFixed(4)}</strong></td>
+                <td class="num"><strong class="editable-rate${q.is_overridden ? " manual-hold" : ""}"
+                    title="${q.is_overridden ? "수기 입력 — 실시간 갱신이 덮지 않습니다. Reset Base 로 해제" : ""}"
+                    >${q.mid.toFixed(4)}${q.is_overridden ? " ✎" : ""}</strong></td>
                 <td class="num" style="${chgColor}">${chgSign}${q.chg_bp ? q.chg_bp.toFixed(2) : "0.00"}</td>
             `;
 

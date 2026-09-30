@@ -224,7 +224,8 @@ class CRSFeed:
             self.spot_fx_tick = datetime.datetime.now().strftime("%H:%M:%S") + " (Manual)"
             self.last_update = datetime.datetime.now()
 
-    def update_quote_manually(self, tenor: str, mid: float, bid: Optional[float] = None, ask: Optional[float] = None):
+    def update_quote_manually(self, tenor: str, mid: float, bid: Optional[float] = None,
+                              ask: Optional[float] = None, source: str = "Manual"):
         with self._lock:
             if tenor == "SPOT" or tenor == "FX" or tenor == "SPOT_FX":
                 self.update_spot_fx_manually(mid)
@@ -233,7 +234,8 @@ class CRSFeed:
                 self.quotes[tenor]["mid"] = round(mid, 4)
                 self.quotes[tenor]["bid"] = round(bid if bid is not None else mid - 0.025, 4)
                 self.quotes[tenor]["ask"] = round(ask if ask is not None else mid + 0.025, 4)
-                self.quotes[tenor]["last_tick"] = datetime.datetime.now().strftime("%H:%M:%S") + " (Manual)"
+                self.quotes[tenor]["last_tick"] = (
+                    datetime.datetime.now().strftime("%H:%M:%S") + f" ({source})")
                 self.last_update = datetime.datetime.now()
 
     def reset_quotes(self):

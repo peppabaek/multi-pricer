@@ -654,12 +654,40 @@ def _sourced(currency: str, snap: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _apply_quote(feed, tenor: str, mid: float, bid=None, ask=None) -> bool:
+def _feed_quotes(feed):
+    """
+    피드의 호가 표. 이름이 통일돼 있지 않습니다 - USD/CRS/FWD 는 quotes,
+    KRW/KOFR 는 _quotes 입니다. 공개 이름만 보면 KRW 의 '모르는 테너' 검사가
+    통째로 건너뛰어집니다.
+    """
+    for attr in ("quotes", "_quotes"):
+        d = getattr(feed, attr, None)
+        if isinstance(d, dict) and d:
+            return d
+    return None
+
+
+def _is_overridden(feed, tenor: str) -> bool:
+    """트레이더가 손으로 넣어둔 값인가."""
+    d = _feed_quotes(feed)
+    if not d:
+        return False
+    key = tenor.strip().upper()
+    for k, v in d.items():
+        if str(k).strip().upper() == key:
+            return bool(isinstance(v, dict) and v.get("is_overridden"))
+    return False
+
+
+def _apply_quote(feed, tenor: str, mid: float, bid=None, ask=None) -> Optional[str]:
     """
     한 건을 피드에 반영하고, 실제로 반영됐는지 돌려준다.
 
     피드마다 갱신 메서드의 이름이 다르다 - CRS 만 update_quote_manually 다.
     중계는 그 차이를 알 필요가 없으므로 여기서 흡수한다.
+
+    반영했으면 None, 아니면 그 이유를 돌려준다. 이유를 뭉뚱그리면 중계 로그가
+    "피드가 모르는 테너" 라고 말하면서 실제로는 수기 입력을 지킨 것일 수 있다.
 
     모르는 테너는 대부분의 피드가 조용히 무시하고 아무것도 돌려주지 않는다. 그걸
     성공으로 세면 '31건 반영'이라 보고하면서 실제로는 한 건도 안 바뀔 수 있다.
@@ -674,10 +702,19 @@ def _apply_quote(feed, tenor: str, mid: float, bid=None, ask=None) -> bool:
     if fn is None:
         raise AttributeError(f"{type(feed).__name__} 에 호가 갱신 메서드가 없습니다")
 
-    known = getattr(feed, "quotes", None)
-    if isinstance(known, dict) and known:
+    known = _feed_quotes(feed)
+    if known:
         if tenor.strip().upper() not in {str(k).strip().upper() for k in known}:
-            return False
+            return "피드가 모르는 테너"
+
+    # 손으로 넣은 값은 덮지 않습니다.
+    #
+    # LSEG 조회는 is_overridden 을 보고 건너뛰는데 중계만 그냥 썼습니다. 그래서
+    # 데스크에서는 남던 수기 입력이 배포본에서는 30초마다 사라졌습니다 -
+    # 트레이더가 O/N~5M 를 채워넣고 다음 틱에 잃는 일이 반복됐습니다.
+    # 되돌리려면 화면의 Reset Base 를 누르면 됩니다.
+    if _is_overridden(feed, tenor):
+        return "수기 입력 유지"
 
     # source 를 알려 마지막 틱이 "(Manual)" 로 찍히지 않게 한다 - 중계로 들어온
     # 값을 사람이 손으로 넣은 것처럼 보이게 하면 안 된다.
@@ -685,7 +722,9 @@ def _apply_quote(feed, tenor: str, mid: float, bid=None, ask=None) -> bool:
         result = fn(tenor, mid, bid, ask, source="Relay")
     except TypeError:
         result = fn(tenor, mid, bid, ask)
-    return True if result is None else bool(result)
+    if result is None or bool(result):
+        return None
+    return "피드가 반영하지 않음"
 
 
 class SolveRateRequest(PricingRequest):
@@ -814,7 +853,7 @@ def push_relayed_quotes(req: RelayPushRequest):
     if not req.quotes:
         raise HTTPException(status_code=400, detail="호가가 비어 있습니다")
 
-    applied, skipped = 0, []
+    applied, skipped, held = 0, [], 0
     for q in req.quotes:
         tenor = str(q.get("tenor") or "").strip()
         mid = q.get("mid")
@@ -822,17 +861,24 @@ def push_relayed_quotes(req: RelayPushRequest):
             skipped.append(tenor or "?")
             continue
         try:
-            if _apply_quote(feed, tenor, float(mid), q.get("bid"), q.get("ask")):
+            why = _apply_quote(feed, tenor, float(mid), q.get("bid"), q.get("ask"))
+            if why is None:
                 applied += 1
+            elif why == "수기 입력 유지":
+                held += 1
             else:
-                skipped.append(f"{tenor}(피드가 모르는 테너)")
+                skipped.append(f"{tenor}({why})")
         except Exception as e:
             skipped.append(f"{tenor}({type(e).__name__}: {e})")
 
-    if not applied:
+    if not applied and not held:
         # 한 건도 반영하지 못했는데 중계를 기록하면, 대시보드가 '데스크 중계 중'
         # 이라고 표시하면서 실제로는 기준호가를 보여준다. 아무것도 안 온 것보다
         # 나쁘다 - 트레이더가 연결됐다고 믿는다.
+        #
+        # 수기로 눌러둔 것은 실패가 아니다. 트레이더가 전 구간을 손으로 채워두면
+        # applied 가 0 이 되는데, 그걸 거절하면 중계가 끊긴 것으로 기록되고
+        # 화면이 BASE 로 떨어진다 - 데스크는 멀쩡한데.
         raise HTTPException(
             status_code=422,
             detail=f"{req.currency} 호가를 한 건도 반영하지 못했습니다: {skipped[:3]}")
@@ -841,7 +887,9 @@ def push_relayed_quotes(req: RelayPushRequest):
                       req.source_timestamp, applied,
                       source_epoch_ms=req.source_epoch_ms)
     return {"status": "success", "data": {
-        "applied": applied, "skipped": skipped, "relay": st}}
+        "applied": applied, "skipped": skipped,
+        # 수기로 눌러둔 호가를 몇 건 지켰는지. 안 보이면 왜 안 바뀌는지 알 수 없다.
+        "held_manual": held, "relay": st}}
 
 
 @app.get("/api/quotes/relay-status")

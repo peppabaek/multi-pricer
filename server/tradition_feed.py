@@ -247,8 +247,15 @@ class TraditionMarketFeed:
                 "quotes": quote_list
             }
 
-    def update_quote(self, tenor: str, new_mid: float, new_bid: Optional[float] = None, new_ask: Optional[float] = None):
-        """Allow trader to override a specific quote manually"""
+    def update_quote(self, tenor: str, new_mid: float, new_bid: Optional[float] = None,
+                     new_ask: Optional[float] = None, source: str = "Manual"):
+        """
+        호가 하나를 갈아끼운다.
+
+        source 가 "Manual" 일 때만 덮어쓰기 표시를 세웁니다. 무조건 세우면 중계로
+        들어온 첫 틱이 그 테너를 '수기 입력' 으로 만들어, 그 뒤 모든 갱신이
+        막힙니다 - 시장이 움직이는 동안 커브가 통째로 얼어붙습니다.
+        """
         with self._lock:
             t = tenor.strip().upper()
             if t in self.quotes:
@@ -258,8 +265,9 @@ class TraditionMarketFeed:
                 q["bid"] = round(new_bid if new_bid is not None else new_mid - spread / 2.0, 4)
                 q["ask"] = round(new_ask if new_ask is not None else new_mid + spread / 2.0, 4)
                 q["chg_bp"] = round((new_mid - q["prev_close"]) * 100.0, 2)
-                q["is_overridden"] = True
-                q["last_tick"] = datetime.datetime.now().strftime("%H:%M:%S") + " (Manual)"
+                q["is_overridden"] = (source == "Manual")
+                q["last_tick"] = (datetime.datetime.now().strftime("%H:%M:%S")
+                                  + f" ({source})")
 
     def stop(self):
         self._running = False

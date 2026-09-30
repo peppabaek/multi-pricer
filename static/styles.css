@@ -3020,3 +3020,12 @@ select:focus {
 }
 .solve-out[hidden] { display: none; }
 .solve-out.bad { background: #fee2e2; border-color: #fca5a5; color: #7f1d1d; }
+
+/* 수기로 눌러둔 호가. 실시간 갱신도 중계도 이 값을 덮지 않으므로, 그 사실이
+   보이지 않으면 시장이 움직이는 동안 얼어붙은 숫자를 시세로 읽게 됩니다. */
+.editable-rate.manual-hold {
+    color: #b45309 !important;
+    background: #fef3c7;
+    border-radius: 3px;
+    padding: 1px 5px;
+}

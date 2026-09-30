@@ -42,6 +42,17 @@ def push(currency="USD", src=None, origin="desk-test", qs=None):
 
 @case("L24-1", "한 번에 여러 호가를 받아 반영한다")
 def t_1():
+    # 이 PC 에는 Workspace 가 떠 있어서, 스냅샷을 읽는 순간 _warm_once 가 LSEG
+    # 에서 다시 당겨와 방금 밀어넣은 값을 덮습니다. 그게 옳은 동작입니다 -
+    # 로컬에 실물 피드가 있으면 그쪽이 낫습니다. 중계가 반영되는지만 보려면
+    # 그 조회를 막아야 합니다.
+    #
+    # 전에는 이 검사가 우연히 통과했습니다: 중계 푸시가 호가를 '수기 입력' 으로
+    # 표시하는 바람에 LSEG 조회가 그 테너를 건너뛰었기 때문입니다. 그 표시는
+    # 버그였고(중계 한 틱 뒤 커브가 통째로 얼어붙음), 고치고 나니 드러났습니다.
+    import server.app as app_module
+    warmed = set(app_module._WARMED)
+    app_module._WARMED.add("usd")
     relay.clear("USD")
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     r = push(src=now)
@@ -52,6 +63,7 @@ def t_1():
 
     d = client.get("/api/market-snapshot").json()["data"]
     got = {q["tenor"]: q["mid"] for q in d["quotes"] if q["tenor"] in ("1Y", "5Y")}
+    app_module._WARMED.intersection_update(warmed)
     if abs(got.get("5Y", 0) - 4.1334) > 1e-6:
         raise AssertionError(f"밀어넣은 호가가 반영되지 않음: {got}")
 
@@ -498,6 +510,92 @@ def t_22():
         params = list(inspect.signature(fn).parameters)
         if len(params) < 3:
             raise AssertionError(f"{name}: {params} — bid/ask 를 받지 못합니다")
+
+
+@case("L24-23", "중계가 수기 입력을 덮지 않는다")
+def t_23():
+    """
+    LSEG 재조회는 is_overridden 을 보고 건너뛰는데 중계만 그냥 썼습니다.
+    데스크에서는 남던 O/N~5M 수기 입력이 배포본에서는 30초마다 사라졌습니다.
+    """
+    import time as _t
+    from fastapi.testclient import TestClient
+    from server.app import app
+    import server.app as app_module
+    client = TestClient(app)
+
+    warmed = set(app_module._WARMED)
+    app_module._WARMED.add("krw")
+    try:
+        def mid_of(tenor):
+            qs = client.get("/api/krw/market-snapshot").json().get("quotes") or []
+            row = next((q for q in qs if q["tenor"] == tenor), {})
+            return row.get("mid"), row.get("is_overridden")
+
+        client.post("/api/krw/quotes/update", json={"tenor": "3M", "mid": 9.9999})
+        if mid_of("3M")[0] != 9.9999:
+            raise AssertionError("수기 입력이 들어가지 않음")
+
+        r = client.post("/api/quotes/push", json={
+            "currency": "KRW", "origin": "desk-test",
+            "source_epoch_ms": _t.time() * 1000,
+            "quotes": [{"tenor": "3M", "mid": 3.21, "bid": 3.20, "ask": 3.22},
+                       {"tenor": "1Y", "mid": 3.7225, "bid": 3.705, "ask": 3.74}]})
+        if r.status_code != 200:
+            raise AssertionError(f"push {r.status_code}: {r.text[:120]}")
+        d = r.json()["data"]
+
+        got, over = mid_of("3M")
+        if got != 9.9999:
+            raise AssertionError(f"중계가 수기 입력을 덮음: {got}")
+        if not over:
+            raise AssertionError("수기 표시가 풀림")
+        if d.get("held_manual") != 1:
+            raise AssertionError(f"지킨 건수를 보고하지 않음: {d}")
+        # 사유를 뭉뚱그리면 로그가 "피드가 모르는 테너" 라고 거짓말합니다.
+        if any("모르는 테너" in x for x in d.get("skipped") or []):
+            raise AssertionError(f"수기 유지를 '모르는 테너'로 보고: {d['skipped']}")
+
+        # 누르지 않은 테너는 그대로 갱신되어야 합니다.
+        qs = client.get("/api/krw/market-snapshot").json().get("quotes") or []
+        one_y = next((q for q in qs if q["tenor"] == "1Y"), {})
+        if abs(float(one_y.get("bid", 0)) - 3.705) > 1e-6:
+            raise AssertionError(f"수기가 아닌 1Y 까지 막힘: {one_y.get('bid')}")
+    finally:
+        app_module._WARMED.intersection_update(warmed)
+
+
+@case("L24-24", "전 구간을 수기로 눌러도 중계가 끊긴 것이 되지 않는다")
+def t_24():
+    # applied 가 0 이라고 거절하면 중계 기록이 남지 않아 화면이 BASE 로
+    # 떨어집니다 - 데스크는 멀쩡한데 트레이더는 연결이 끊긴 줄 압니다.
+    import time as _t
+    from fastapi.testclient import TestClient
+    from server.app import app
+    client = TestClient(app)
+    client.post("/api/krw/quotes/update", json={"tenor": "3M", "mid": 8.8888})
+    r = client.post("/api/quotes/push", json={
+        "currency": "KRW", "origin": "desk-test", "source_epoch_ms": _t.time() * 1000,
+        "quotes": [{"tenor": "3M", "mid": 3.21}]})
+    if r.status_code != 200:
+        raise AssertionError(f"수기뿐인 푸시를 거절함: {r.status_code} {r.text[:120]}")
+    if not (r.json()["data"].get("relay") or {}).get("active"):
+        raise AssertionError("중계가 기록되지 않음")
+
+
+@case("L24-25", "수기로 눌러둔 호가가 화면에 표시된다")
+def t_25():
+    # 갱신이 덮지 않는 값이라면, 그 사실이 보여야 합니다. 안 그러면 시장이
+    # 움직이는 동안 얼어붙은 숫자를 시세로 읽습니다.
+    with io.open(os.path.join(ROOT, "static", "app.js"), encoding="utf-8") as f:
+        js = f.read()
+    if "is_overridden" not in js:
+        raise AssertionError("화면이 수기 여부를 보지 않음")
+    if "manual-hold" not in js:
+        raise AssertionError("수기 호가를 구분해 표시하지 않음")
+    with io.open(os.path.join(ROOT, "static", "styles.css"), encoding="utf-8") as f:
+        if "manual-hold" not in f.read():
+            raise AssertionError("표시 스타일이 없음")
 
 
 if __name__ == "__main__":
