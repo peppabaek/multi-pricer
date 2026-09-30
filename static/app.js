@@ -643,6 +643,19 @@ document.addEventListener("DOMContentLoaded", () => {
     // --------------------------------------------------------------------------
     // 2. Currency Switcher Handler
     // --------------------------------------------------------------------------
+    /**
+     * 없는 요소에 글자를 쓰려다 죽지 않도록.
+     *
+     * setCurrency 가 th-fixed-cf 같은 테이블 헤더 일곱 개에 textContent 를
+     * 쓰는데, 그 요소들은 마크업에서 사라진 지 오래였습니다. KRW 로 바꿀
+     * 때마다 거기서 TypeError 가 나고 setCurrency 가 중단됐습니다 - 통화는
+     * 바뀌지 않은 채로요. 그래서 KRW term sheet 을 적용하면 USD 커브로
+     * 프라이싱됐고, 화면 어디에도 그 말은 없었습니다.
+     */
+    function setText(el, text) {
+        if (el) el.textContent = text;
+    }
+
     function setCurrency(newCurrency) {
         if (state.currency !== newCurrency && typeof saveActiveTicketFormData === "function") {
             saveActiveTicketFormData();
@@ -754,13 +767,13 @@ document.addEventListener("DOMContentLoaded", () => {
             elements.lbl5yRate.textContent = "5Y CRS";
 
             // Headers
-            elements.thFixedCf.textContent = "KRW Leg CF (\u20A9)";
-            elements.thFixedPv.textContent = "KRW Leg PV (\u20A9)";
-            elements.thFwdRate.textContent = "Fwd SOFR";
-            elements.thFloatCf.textContent = "USD Leg CF ($)";
-            elements.thFloatPv.textContent = "USD Leg PV ($)";
-            elements.thNetCf.textContent = "Net CF (\u20A9)";
-            elements.thNetPv.textContent = "Net PV (\u20A9)";
+            setText(elements.thFixedCf, "KRW Leg CF (\u20A9)");
+            setText(elements.thFixedPv, "KRW Leg PV (\u20A9)");
+            setText(elements.thFwdRate, "Fwd SOFR");
+            setText(elements.thFloatCf, "USD Leg CF ($)");
+            setText(elements.thFloatPv, "USD Leg PV ($)");
+            setText(elements.thNetCf, "Net CF (\u20A9)");
+            setText(elements.thNetPv, "Net PV (\u20A9)");
             elements.thLeg1Notional.textContent = "KRW Notional (\u20A9)";
             elements.thLeg1Frac.textContent = "Fraction (30/360)";
             elements.thLeg1Cf.textContent = "KRW Flow (\u20A9)";
@@ -801,13 +814,13 @@ document.addEventListener("DOMContentLoaded", () => {
             elements.lbl5yRate.textContent = "3Y KOFR";
 
             // Headers
-            elements.thFixedCf.textContent = "Fixed CF (\u20A9)";
-            elements.thFixedPv.textContent = "Fixed PV (\u20A9)";
-            elements.thFwdRate.textContent = "Fwd KOFR";
-            elements.thFloatCf.textContent = "Float CF (\u20A9)";
-            elements.thFloatPv.textContent = "Float PV (\u20A9)";
-            elements.thNetCf.textContent = "Net CF (\u20A9)";
-            elements.thNetPv.textContent = "Net PV (\u20A9)";
+            setText(elements.thFixedCf, "Fixed CF (\u20A9)");
+            setText(elements.thFixedPv, "Fixed PV (\u20A9)");
+            setText(elements.thFwdRate, "Fwd KOFR");
+            setText(elements.thFloatCf, "Float CF (\u20A9)");
+            setText(elements.thFloatPv, "Float PV (\u20A9)");
+            setText(elements.thNetCf, "Net CF (\u20A9)");
+            setText(elements.thNetPv, "Net PV (\u20A9)");
             elements.thLeg1Notional.textContent = "Notional (\u20A9)";
             elements.thLeg1Frac.textContent = "Fraction (Act/365)";
             elements.thLeg1Cf.textContent = "Fixed CF (\u20A9)";
@@ -848,13 +861,13 @@ document.addEventListener("DOMContentLoaded", () => {
             elements.lbl5yRate.textContent = "3Y IRS";
 
             // Headers
-            elements.thFixedCf.textContent = "Fixed CF (\u20A9)";
-            elements.thFixedPv.textContent = "Fixed PV (\u20A9)";
-            elements.thFwdRate.textContent = "Fwd CD 91D";
-            elements.thFloatCf.textContent = "Float CF (\u20A9)";
-            elements.thFloatPv.textContent = "Float PV (\u20A9)";
-            elements.thNetCf.textContent = "Net CF (\u20A9)";
-            elements.thNetPv.textContent = "Net PV (\u20A9)";
+            setText(elements.thFixedCf, "Fixed CF (\u20A9)");
+            setText(elements.thFixedPv, "Fixed PV (\u20A9)");
+            setText(elements.thFwdRate, "Fwd CD 91D");
+            setText(elements.thFloatCf, "Float CF (\u20A9)");
+            setText(elements.thFloatPv, "Float PV (\u20A9)");
+            setText(elements.thNetCf, "Net CF (\u20A9)");
+            setText(elements.thNetPv, "Net PV (\u20A9)");
             elements.thLeg1Notional.textContent = "Notional (\u20A9)";
             elements.thLeg1Frac.textContent = "Fraction (Act/365)";
             elements.thLeg1Cf.textContent = "Fixed CF (\u20A9)";
@@ -895,13 +908,13 @@ document.addEventListener("DOMContentLoaded", () => {
             elements.lbl5yRate.textContent = "5Y Swap";
 
             // Headers
-            elements.thFixedCf.textContent = "Fixed CF ($)";
-            elements.thFixedPv.textContent = "Fixed PV ($)";
-            elements.thFwdRate.textContent = "Fwd SOFR";
-            elements.thFloatCf.textContent = "Float CF ($)";
-            elements.thFloatPv.textContent = "Float PV ($)";
-            elements.thNetCf.textContent = "Net CF ($)";
-            elements.thNetPv.textContent = "Net PV ($)";
+            setText(elements.thFixedCf, "Fixed CF ($)");
+            setText(elements.thFixedPv, "Fixed PV ($)");
+            setText(elements.thFwdRate, "Fwd SOFR");
+            setText(elements.thFloatCf, "Float CF ($)");
+            setText(elements.thFloatPv, "Float PV ($)");
+            setText(elements.thNetCf, "Net CF ($)");
+            setText(elements.thNetPv, "Net PV ($)");
             elements.thLeg1Notional.textContent = "Notional ($)";
             elements.thLeg1Frac.textContent = "Fraction (Act/360)";
             elements.thLeg1Cf.textContent = "Fixed CF ($)";

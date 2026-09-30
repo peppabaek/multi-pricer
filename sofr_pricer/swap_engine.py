@@ -159,6 +159,14 @@ class USDSOFRSwapPricer:
                 p_notional = float(p.get("notional", notional))
                 p_rate_val = p.get("fixed_rate_pct")
                 p_rate = float(p_rate_val) if (p_rate_val is not None and float(p_rate_val) > 0.0) else fixed_coupon_pct
+                # 쿠폰을 주지 않은 par 계산에서는 아직 값이 없습니다. 커스텀
+                # 스케줄에 회차별 금리도 없으면 여기서 None 이 되어
+                # "unsupported operand type(s) for /: 'NoneType' and 'float'" 로
+                # 죽었습니다 - 스케줄이 없는 경로는 아래에서 None 을 걸러내는데
+                # 이쪽만 빠져 있었습니다. 0 으로 두면 par 를 구한 뒤 아래에서
+                # 전 회차를 올바른 쿠폰으로 다시 채웁니다.
+                if p_rate is None:
+                    p_rate = 0.0
                 frac = calc_dc_fraction(st, ed, l1_dc)
                 df = self.curve.get_df(pay_dt) / df_settle
                 fixed_cf = p_notional * (p_rate / 100.0) * frac

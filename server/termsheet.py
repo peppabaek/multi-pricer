@@ -1112,12 +1112,32 @@ def check_schedule(trade: ExtractedTrade) -> List[str]:
     if not sched:
         return warnings
 
+    # 연속성 검사는 "기간이 시간축을 차례로 덮는다" 를 전제합니다. 국내 은행
+    # 원화 IRS 의 이자교환 일정표는 그렇지 않은 모양을 씁니다: 지급일이 휴일
+    # 때문에 밀리면, 상환되는 원금만 그 며칠을 더 받는 짜투리 행이 따로 섭니다.
+    #
+    #   2026-09-18 → 2026-10-18   명목 2,500,000,000
+    #   2026-10-18 → 2026-10-19   명목   138,904,000   (상환분, 1일)
+    #   2026-10-18 → 2026-11-18   명목 2,361,096,000   (잔액)
+    #
+    # 두 행은 시간이 아니라 명목을 쪼갠 것이고, 합이 직전 기간과 같습니다.
+    # 이것을 "이어지지 않는다" 고 경고하면, 맞게 읽은 스케줄을 트레이더가
+    # 의심하게 됩니다. 실제로 이 구조에서 오탐이 났습니다.
     for i in range(1, len(sched)):
-        if sched[i].start_date != sched[i - 1].end_date:
-            warnings.append(
-                f"스케줄 {i}기와 {i+1}기가 이어지지 않습니다 "
-                f"({sched[i-1].end_date} → {sched[i].start_date})")
-            break
+        prev, cur = sched[i - 1], sched[i]
+        if cur.start_date == prev.end_date:
+            continue
+        # 같은 날 시작하는 형제 행들의 명목 합이 직전 기간과 맞으면 쪼갠 것입니다.
+        siblings = [p for p in sched if p.start_date == cur.start_date]
+        if len(siblings) > 1:
+            before = [p for p in sched if p.end_date == cur.start_date]
+            total = sum(p.notional or 0 for p in siblings)
+            if before and abs(total - (before[-1].notional or 0)) <= 1.0:
+                continue
+        warnings.append(
+            f"스케줄 {i}기와 {i+1}기가 이어지지 않습니다 "
+            f"({prev.end_date} → {cur.start_date})")
+        break
 
     headline = trade.notional or trade.usd_notional
     if headline and sched and abs(sched[0].notional - headline) > 1.0:
@@ -1200,6 +1220,47 @@ def tenor_from_dates(effective: Optional[str], maturity: Optional[str]) -> Optio
     return f"{months}M"
 
 
+def freq_from_schedule(sched) -> Optional[str]:
+    """
+    스케줄 간격에서 지급주기를 읽어낸다.
+
+    모델이 "Monthly" 라는 말을 못 찾으면 통화 기본값(원화 3M)으로 떨어지는데,
+    월별 일정표를 3M 으로 계산하면 변동다리가 통째로 어긋납니다. 날짜는 표에
+    적혀 있으니 거기서 셉니다.
+    """
+    days = []
+    for a, b in zip(sched, sched[1:]):
+        try:
+            d0 = datetime.date.fromisoformat(str(a.start_date)[:10])
+            d1 = datetime.date.fromisoformat(str(b.start_date)[:10])
+        except ValueError:
+            continue
+        gap = (d1 - d0).days
+        if gap > 0:
+            days.append(gap)
+    if len(days) < 2:
+        return None
+    days.sort()
+    med = days[len(days) // 2]
+    for months, lo, hi in ((1, 25, 38), (3, 80, 100), (6, 165, 195), (12, 340, 390)):
+        if lo <= med <= hi:
+            return f"{months}M"
+    return None
+
+
+def notional_from_schedule(sched) -> Optional[float]:
+    """
+    스케줄 첫 기간의 명목. 헤드라인 원금을 못 읽었을 때 씁니다.
+
+    통화 기본값으로 떨어지면 25억짜리 거래가 1000억으로 계산됩니다 - 40배입니다.
+    스케줄은 같은 문서에서 읽은 값이라 지어낸 기본값보다 낫습니다.
+    """
+    if not sched:
+        return None
+    first = sched[0]
+    return float(first.notional) if first.notional else None
+
+
 def to_ticket_draft(trade: ExtractedTrade) -> Dict[str, Any]:
     """Map extracted terms onto the dashboard's ticket shape, marking which fields are defaults."""
     curr = trade.currency or "USD"
@@ -1214,10 +1275,15 @@ def to_ticket_draft(trade: ExtractedTrade) -> Dict[str, Any]:
 
     notional = trade.usd_notional if curr == "KRW_CRS" and trade.usd_notional else trade.notional
     derived_tenor = tenor_from_dates(trade.effective_date, trade.maturity_date)
+    sched = trade.leg1_custom_schedule or []
+    # 문서에서 읽은 스케줄이 지어낸 통화 기본값보다 낫습니다.
+    derived_notional = notional_from_schedule(sched)
+    derived_freq = freq_from_schedule(sched)
     draft = {
         "product": curr,
         "position": pick(trade.position, "Pay Fixed", "position"),
-        "notionalDisplay": _fmt(pick(notional, d["notional"], "notional")),
+        "notionalDisplay": _fmt(notional or derived_notional
+                                or pick(None, d["notional"], "notional")),
         # 날짜에서 읽은 테너는 "시장 관행 적용" 이 아닙니다 - 문서에 적힌 날짜
         # 두 개에서 나온 값입니다. 통화 기본값까지 내려갔을 때만 지어낸 것으로
         # 표시합니다.
@@ -1232,7 +1298,10 @@ def to_ticket_draft(trade: ExtractedTrade) -> Dict[str, Any]:
         "usdFixedCoupon": (f"{trade.usd_fixed_coupon_pct:.4f}"
                            if trade.usd_fixed_coupon_pct is not None else "3.5000"),
         "leg1DayCount": pick(trade.leg1_day_count, d["dc"], "leg1_day_count"),
-        "leg1PaymentFreq": pick(trade.leg1_payment_freq, d["freq"], "leg1_payment_freq"),
+        # 표의 날짜 간격에서 읽은 주기는 지어낸 값이 아닙니다. 월별 일정표를
+        # 원화 기본값 3M 으로 계산하면 변동다리가 통째로 어긋납니다.
+        "leg1PaymentFreq": (trade.leg1_payment_freq or derived_freq
+                            or pick(None, d["freq"], "leg1_payment_freq")),
         "leg1Convention": pick(trade.leg1_business_day_conv, "Modified Following", "leg1_business_day_conv"),
         "leg1Stub": pick(trade.leg1_stub_rule, "Short in arrears", "leg1_stub_rule"),
         "leg1Adjust": pick(trade.leg1_adjust_rule, "Adjust", "leg1_adjust_rule"),
