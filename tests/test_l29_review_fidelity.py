@@ -284,6 +284,86 @@ def t_12():
             os.environ["ANTHROPIC_MODEL"] = saved
 
 
+@case("L29-13", "사진은 교차검증하지 않는다")
+def t_13():
+    """
+    교차검증은 second_extractor(redacted_text) 를 부르는데, 사진 경로에서
+    redacted_text 는 빈 문자열입니다. 2차 모델은 이미지를 보지 못합니다.
+
+    그대로 두면 빈 문서로 추출을 돌리고, 그 결과와의 '불일치' 를 판정해서
+    실제 거래조건에 덮어씁니다 - 사진에서 읽은 만기일이 아무것도 못 본 모델의
+    답으로 바뀔 수 있습니다. 2차 프로바이더 키가 없어 여태 실행된 적이 없었을
+    뿐, 키를 넣는 순간 켜지는 경로였습니다.
+    """
+    import sample_formats as SF
+    import server.termsheet as T
+
+    called = {"n": 0}
+
+    def spy(text):
+        called["n"] += 1
+        raise AssertionError("사진인데 2차 추출기가 호출됨")
+
+    out = T.process_termsheet(
+        SF.phone_jpeg_bytes(1400, 1050),
+        extractor=lambda payload: __import__("test_l11_scenarios").
+            _stub("TS-B")(""),
+        second_extractor=spy,
+        filename="IMG.JPG")
+    if called["n"]:
+        raise AssertionError("2차 추출기가 빈 문서로 호출됨")
+    cv = out.get("cross_validation") or {}
+    if cv.get("compared"):
+        raise AssertionError("사진인데 교차검증했다고 보고")
+
+
+@case("L29-14", "판정이 실패해도 비교 결과를 버리지 않는다")
+def t_14():
+    # 무료 등급에서는 재검토 프롬프트가 토큰 한도를 넘어 429 가 납니다. 그때
+    # 두 모델이 어느 필드에서 갈렸는지까지 잃으면, 확인할 거리가 사라집니다.
+    with io.open(os.path.join(ROOT, "server", "termsheet.py"), encoding="utf-8") as f:
+        src = f.read()
+    i = src.find("Round two:")
+    if i < 0:
+        raise AssertionError("판정 단계를 찾지 못함")
+    body = src[i:i + 2200]
+    if "adjudication_error" not in body:
+        raise AssertionError("판정 실패를 따로 기록하지 않음")
+    if body.count("try:") < 1:
+        raise AssertionError("판정이 별도 try 로 감싸여 있지 않음 — 비교까지 함께 날아갑니다")
+
+
+@case("L29-15", "Groq 는 비전 제공자로 등록되지 않는다")
+def t_15():
+    """
+    이 계정의 Groq 모델 목록에 이미지 모델이 없습니다:
+      allam-2-7b · orpheus(TTS) · llama-prompt-guard · gpt-oss-120b/20b ·
+      qwen3.8-27b · whisper ×2
+    비전 목록에 넣으면 사진마다 없는 모델을 부르고 실패합니다.
+    """
+    from server.providers import supports_vision, VISION_CAPABLE
+    if supports_vision("groq"):
+        raise AssertionError("Groq 에는 쓸 수 있는 비전 모델이 없습니다")
+    for name in ("gemini", "anthropic"):
+        if name not in VISION_CAPABLE:
+            raise AssertionError(f"{name} 이 비전 목록에서 빠짐")
+
+
+@case("L29-16", "Groq 기본 모델이 실재하는 모델이다")
+def t_16():
+    # llama-3.3-70b-versatile 은 이 계정에 없어 "does not exist" 로 죽었습니다.
+    # 키가 없어 아무도 몰랐을 뿐, 텍스트 경로도 깨져 있었습니다.
+    saved = os.environ.pop("GROQ_MODEL", None)
+    try:
+        from server.providers import model_candidates
+        first = model_candidates("groq")[0]
+        if "llama-3.3" in first:
+            raise AssertionError(f"존재하지 않는 모델이 기본값: {first}")
+    finally:
+        if saved is not None:
+            os.environ["GROQ_MODEL"] = saved
+
+
 if __name__ == "__main__":
     print("\n=== L29 검토 창 정확도 ===")
     sys.exit(1 if run_all("L29") else 0)

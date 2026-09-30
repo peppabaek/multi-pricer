@@ -1568,7 +1568,14 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
     # silently did not run must not look like one that ran and agreed.
     second_configured = bool(os.environ.get("TERMSHEET_SECOND_PROVIDER", "").strip())
     second_error = None
-    if second_extractor is None and extractor is None:
+    if by_vision and second_extractor is None:
+        # 사진 경로에는 대조할 텍스트가 없습니다 - redacted_text 는 빈 문자열이고,
+        # 2차 프로바이더는 이미지를 보지 못합니다. 그대로 두면 빈 문서로 추출을
+        # 돌리고, 그 결과와의 "불일치" 를 판정해서 실제 거래조건에 덮어씁니다.
+        # 사진에서 읽은 만기일이 아무것도 안 읽은 모델의 답으로 바뀔 수 있습니다.
+        second_error = ("사진·스캔은 교차검증하지 않습니다 — 2차 모델이 볼 수 있는 "
+                        "텍스트가 없습니다")
+    elif second_extractor is None and extractor is None:
         try:
             if used.get("provider") and used["provider"] == os.environ.get(
                     "TERMSHEET_SECOND_PROVIDER", "").strip().lower():
@@ -1581,7 +1588,10 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
             second_error = str(e)
             _log(f"[Termsheet] second provider unavailable: {e}")
     adjudication = None
-    if second_extractor is not None:
+    # by_vision 을 여기서 다시 봅니다. 위의 안내문만으로는 second_extractor 를
+    # 직접 넘긴 경우를 막지 못했습니다 - 기준은 "어떻게 얻었는가" 가 아니라
+    # "대조할 텍스트가 있는가" 입니다.
+    if second_extractor is not None and not by_vision:
         try:
             from server.crossvalidate import (
                 compare_extractions, adjudicate, format_disputes,
@@ -1591,20 +1601,33 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
 
             # Round two: where they differ, both re-read the document for those fields
             # and must cite the text that settles it.
+            #
+            # 별도의 try 입니다. 2라운드가 실패해도 1라운드 결과를 버리지 않기
+            # 위해서입니다 - 전에는 판정이 실패하면 비교 결과까지 함께 사라져
+            # "교차검증 실행 안 됨" 으로 보고했습니다. 두 모델이 어느 필드에서
+            # 갈렸는지는 그 자체로 트레이더가 확인할 거리이고, 판정이 못 붙은
+            # 채로라도 알려주는 편이 낫습니다. (무료 등급에서는 재검토 프롬프트가
+            # 토큰 한도를 넘어 429 가 납니다.)
             if comparison.get("compared") and comparison.get("disagreements"):
-                rp = reviewers[0] if reviewers else claude_reviewer
-                rs = reviewers[1] if reviewers and len(reviewers) > 1 else secondary_reviewer()
-                if rs is not None:
-                    disputes = format_disputes(comparison)
-                    adjudication = adjudicate(
-                        comparison,
-                        rp(redacted_text, disputes),
-                        rs(redacted_text, disputes),
-                        redacted_text,
-                    )
-                    for field, value in adjudication["resolved"].items():
-                        if hasattr(trade, field):
-                            setattr(trade, field, value)
+                try:
+                    rp = reviewers[0] if reviewers else claude_reviewer
+                    rs = (reviewers[1] if reviewers and len(reviewers) > 1
+                          else secondary_reviewer())
+                    if rs is not None:
+                        disputes = format_disputes(comparison)
+                        adjudication = adjudicate(
+                            comparison,
+                            rp(redacted_text, disputes),
+                            rs(redacted_text, disputes),
+                            redacted_text,
+                        )
+                        for field, value in adjudication["resolved"].items():
+                            if hasattr(trade, field):
+                                setattr(trade, field, value)
+                except Exception as e:
+                    _log(f"[Termsheet] adjudication failed, keeping comparison: {e}")
+                    comparison = dict(comparison)
+                    comparison["adjudication_error"] = str(e)[:200]
         except Exception as e:
             second_error = str(e)
             _log(f"[Termsheet] cross-validation failed: {e}")

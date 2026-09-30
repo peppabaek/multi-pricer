@@ -66,7 +66,15 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "label": "Groq",
         "key_env": ["GROQ_API_KEY"],
         "model_env": "GROQ_MODEL",
-        "default_model": "llama-3.3-70b-versatile",
+        # 이 계정에서 실제로 쓸 수 있는 모델을 골랐습니다. 전에 있던
+        # llama-3.3-70b-versatile 은 목록에 없어 "does not exist" 로 죽었습니다 -
+        # 키가 없어 아무도 알아채지 못했을 뿐, 텍스트 경로도 깨져 있었습니다.
+        # 같은 term sheet 로 재봤습니다:
+        #   qwen/qwen3.8-27b      4.4s  전부 정확
+        #   openai/gpt-oss-120b   9.9s  전부 정확
+        #   openai/gpt-oss-20b    실패 (JSON 스키마 검증)
+        "default_model": "qwen/qwen3.8-27b",
+        "fallback_models": ["openai/gpt-oss-120b"],
         "base_url": "https://api.groq.com/openai/v1",
         "openai_compatible": True,
         "tier_env": "GROQ_TIER",
