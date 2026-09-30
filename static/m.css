@@ -430,3 +430,32 @@ body { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
 .m-adv-tag[hidden] { display: none; }
 
 .m-field[hidden] { display: none; }
+
+/* 목표 MtM 역산. 쿠폰 칸 바로 아래에 둡니다 - 같은 값을 반대 방향에서
+   묻는 것이라, 떨어뜨려 놓으면 두 기능처럼 보입니다. */
+.m-solve { margin-bottom: 10px; }
+.m-solve-row { display: flex; gap: 8px; }
+.m-solve-row input { flex: 1; min-width: 0; }
+.m-solve-row button {
+    flex: 0 0 auto;
+    min-height: 46px;
+    padding: 0 14px;
+    font: 700 13px/1 inherit;
+    color: #fff;
+    background: var(--blue);
+    border: 1.5px solid var(--blue);
+    border-radius: 8px;
+    cursor: pointer;
+}
+.m-solve-row button:disabled { opacity: .55; }
+.m-solve-out {
+    margin: 6px 2px 0 2px;
+    padding: 9px 11px;
+    border-radius: 8px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    font: 600 12.5px/1.5 var(--mono);
+    color: #1e3a8a;
+}
+.m-solve-out[hidden] { display: none; }
+.m-solve-out.bad { background: #fee2e2; border-color: #fca5a5; color: #7f1d1d; }

@@ -91,6 +91,20 @@
         </label>
     </div>
 
+    <!-- 마케터가 태핑할 때 묻는 것은 "이 금리면 얼마냐" 가 아니라 "얼마를
+         받으려면 금리가 몇이냐" 입니다. -->
+    <div class="m-solve">
+        <label class="m-field">
+            <span>목표 MtM — 금리 역산</span>
+            <div class="m-solve-row">
+                <input type="text" inputmode="numeric" id="in-target-mtm"
+                       placeholder="예: 2,000,000">
+                <button type="button" id="btn-solve">금리 구하기</button>
+            </div>
+        </label>
+        <p class="m-solve-out" id="solve-out" hidden></p>
+    </div>
+
     <!-- 평소엔 접어둡니다. 휴대폰에서 대부분의 거래는 바닐라이고, 이 칸들이
          펼쳐져 있으면 자주 쓰는 입력이 화면 밖으로 밀립니다. -->
     <details class="m-more" id="adv-block">

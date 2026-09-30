@@ -270,6 +270,61 @@
         }
     }
 
+    /**
+     * 목표 MtM 을 주고 금리를 받는다.
+     *
+     * 서버가 닫힌 식으로 풀고, 그 금리로 다시 프라이싱해 실제 MtM 을 함께
+     * 돌려줍니다. 여기서는 그 검산 결과를 그대로 보여줍니다 - "이 금리면 이
+     * 금액" 이라고 말하면서 실제로는 다른 금액이 나오는 일이 없도록.
+     */
+    async function solveRate() {
+        readForm();
+        const target = C.numOrNull($("in-target-mtm").value);
+        const out = $("solve-out");
+        if (target === null) {
+            show(out, "목표 MtM 을 입력하세요", true);
+            return;
+        }
+        busy(true, "금리 역산 중…");
+        try {
+            const body = Object.assign(C.buildRequest(state), { target_mtm: target });
+            delete body.fixed_coupon_pct;      // 구하려는 값입니다
+            const r = await fetch("/api/solve-rate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            const j = await r.json();
+            if (!r.ok) throw new Error(j.detail || ("HTTP " + r.status));
+            const d = j.data;
+
+            // 구한 금리를 쿠폰 칸에 넣고 바로 프라이싱합니다. 숫자만 보여주고
+            // 끝내면 트레이더가 손으로 옮겨 적어야 합니다.
+            // 표시용 4자리로 잘라 넣으면 안 됩니다. 1e-4 % 는 DV01 x 1e-2 만큼
+            // 움직여서, 방금 구한 금리가 목표 MtM 을 더 이상 내지 않습니다.
+            $("in-coupon").value = Number(d.coupon_pct).toFixed(6);
+            const sp = d.spread_vs_par_bp;
+            show(out,
+                `금리 ${C.pct(d.coupon_pct)}%  (par ${C.pct(d.par_swap_rate_pct)}%`
+                + ` · ${sp >= 0 ? "+" : ""}${Number(sp).toFixed(2)}bp)
+`
+                + `실제 MtM ${C.money(d.achieved_mtm, state.currency === "USD" ? "USD" : "KRW")}`
+                + (Math.abs(d.residual || 0) > 1 ? `  (목표와 ${C.money(d.residual, state.currency === "USD" ? "USD" : "KRW")} 차이)` : ""),
+                false);
+            await price(false);
+        } catch (err) {
+            show(out, "역산 실패: " + err.message, true);
+        } finally {
+            busy(false);
+        }
+    }
+
+    function show(el, text, bad) {
+        el.hidden = false;
+        el.textContent = text;
+        el.className = "m-solve-out" + (bad ? " bad" : "");
+    }
+
     // ---- Term Sheet --------------------------------------------------------
 
     let tsPending = null;
@@ -479,6 +534,8 @@
         $("btn-price").disabled = off;
         $("btn-reload").disabled = off;
         $("ts-btn").disabled = off;
+        const sb = $("btn-solve");
+        if (sb) sb.disabled = off;
     }
 
     function notice(msg, bad) {
@@ -512,6 +569,12 @@
 
         ["in-curve", "in-crs-type", "in-usd-coupon"].forEach((id) => {
             $(id).addEventListener("change", () => { readForm(); paintInputs(); price(false); });
+        });
+
+        $("btn-solve").addEventListener("click", solveRate);
+        $("in-target-mtm").addEventListener("blur", (e) => {
+            const n = C.numOrNull(e.target.value);
+            if (n !== null) e.target.value = C.commas(n);
         });
 
         $("ts-btn").addEventListener("click", () => $("ts-file").click());

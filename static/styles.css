@@ -1256,6 +1256,10 @@ select:focus {
 }
 
 .phase-card {
+    /* 그리드/플렉스 자식의 기본 min-width 는 auto 라, 안쪽에 줄바꿈 안 되는
+       요소가 하나만 있어도 칸이 내용 폭까지 벌어집니다. 두 장이 나란히 서는
+       821~1240px 에서 그만큼 밖으로 밀렸습니다. */
+    min-width: 0;
     background: #ffffff;
     border: 1px solid #cbd5e1;
     border-radius: var(--radius-md);
@@ -2982,3 +2986,37 @@ select:focus {
     color: #94a3b8 !important;
 }
 .panel-results.not-live { border-color: #fcd34d; }
+
+/* 목표 MtM 역산. 쿠폰 칸 바로 아래 - 같은 값을 반대 방향에서 묻는 것이라
+   떨어뜨려 놓으면 두 기능처럼 보입니다. */
+/* 좁아지면 줄을 바꿉니다. 버튼이 nowrap 이라 한 줄을 고집하면 레그 카드가
+   넓어지고, 2열 그리드가 되는 821~1240px 에서 카드 안쪽이 통째로 밀립니다. */
+.solve-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.solve-row input { flex: 1 1 110px; min-width: 0; }
+.solve-row button {
+    flex: 0 1 auto;
+    padding: 0 12px;
+    font-size: 11.5px;
+    font-weight: 800;
+    color: #fff;
+    background: #1d4ed8;
+    border: 1.5px solid #1d4ed8;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.solve-row button:disabled { opacity: .55; cursor: default; }
+.solve-out {
+    margin-top: 6px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    line-height: 1.55;
+    color: #1e3a8a;
+    white-space: pre-line;
+}
+.solve-out[hidden] { display: none; }
+.solve-out.bad { background: #fee2e2; border-color: #fca5a5; color: #7f1d1d; }

@@ -1440,13 +1440,15 @@ document.addEventListener("DOMContentLoaded", () => {
     // --------------------------------------------------------------------------
     // 6. Pricing Calculation Engine
     // --------------------------------------------------------------------------
-    async function calculatePricing() {
-        if (state.currency === "USD_FWD") {
-            return calculateFwdPricing();
-        }
-        try {
-            elements.calcStatus.textContent = "Calculating...";
-            elements.calcStatus.className = "calc-status-badge calc-loading";
+    /**
+     * 프라이싱 요청 본문을 만든다.
+     *
+     * calculatePricing 안에 인라인으로 있던 것을 꺼냈습니다. 목표 MtM 역산도
+     * 같은 조건으로 물어야 하는데, 60줄을 복사하면 한쪽만 고쳐지는 날이
+     * 옵니다 - 컨벤션 하나가 달라진 채로 "이 금리면 이 금액" 이라고 말하게
+     * 됩니다.
+     */
+    function buildPricingPayload() {
 
             const notional = parseFormattedNumber(elements.notionalDisplay?.value || "100,000,000");
             const position = elements.positionSelect?.value || "Pay Fixed";
@@ -1537,7 +1539,85 @@ document.addEventListener("DOMContentLoaded", () => {
                 leg1_raw_paste_text: elements.rcPasteInputLeg1 ? elements.rcPasteInputLeg1.value.trim() : null,
                 leg2_raw_paste_text: elements.rcPasteInputLeg2 ? elements.rcPasteInputLeg2.value.trim() : null
             };
+        return payload;
+    }
 
+    /**
+     * 목표 MtM 을 주고 고정금리를 받는다.
+     *
+     * 프라이싱과 같은 조건으로 물어야 하므로 buildPricingPayload 를 그대로
+     * 씁니다. 서버가 닫힌 식으로 풀고 그 금리로 다시 프라이싱해 실제 MtM 을
+     * 돌려주므로, 검산 결과를 그대로 보여줍니다.
+     */
+    async function solveRateFromMtm() {
+        const out = document.getElementById("solve-rate-out");
+        const btn = document.getElementById("btn-solve-rate");
+        const input = document.getElementById("target-mtm");
+        if (!out || !input) return;
+
+        const target = parseFormattedNumber(input.value);
+        if (!Number.isFinite(target)) {
+            out.hidden = false;
+            out.className = "solve-out bad";
+            out.textContent = "목표 MtM 을 입력하세요";
+            return;
+        }
+        if (state.currency === "USD_FWD") {
+            out.hidden = false;
+            out.className = "solve-out bad";
+            out.textContent = "FX FWD 는 고정금리 거래가 아니라 역산 대상이 아닙니다";
+            return;
+        }
+
+        if (btn) btn.disabled = true;
+        try {
+            const payload = buildPricingPayload();
+            payload.target_mtm = target;
+            delete payload.fixed_coupon_pct;      // 구하려는 값입니다
+
+            const resp = await fetch("/api/solve-rate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const json = await resp.json();
+            if (!resp.ok) throw new Error(json.detail || ("HTTP " + resp.status));
+            const d = json.data;
+
+            // 구한 금리를 쿠폰 칸에 넣고 바로 프라이싱합니다. 숫자만 띄우고
+            // 끝내면 손으로 옮겨 적어야 합니다. userEdited 를 세워야 par 가
+            // 덮어쓰지 않습니다.
+            if (elements.couponInput) {
+                elements.couponInput.value = Number(d.coupon_pct).toFixed(6);
+                elements.couponInput.dataset.userEdited = "true";
+            }
+            const isKrw = state.currency.startsWith("KRW");
+            const sp = Number(d.spread_vs_par_bp);
+            out.hidden = false;
+            out.className = "solve-out";
+            out.textContent =
+                `금리 ${Number(d.coupon_pct).toFixed(6)} %   `
+                + `(par ${Number(d.par_swap_rate_pct).toFixed(4)} % · ${sp >= 0 ? "+" : ""}${sp.toFixed(2)} bp)
+`
+                + `실제 MtM ${formatCurrency(d.achieved_mtm, isKrw)}`
+                + (Math.abs(d.residual || 0) > 1
+                   ? `   목표와 ${formatCurrency(d.residual, isKrw)} 차이` : "");
+            await calculatePricing();
+        } catch (err) {
+            out.hidden = false;
+            out.className = "solve-out bad";
+            out.textContent = "역산 실패: " + err.message;
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    async function calculatePricing() {
+        if (state.currency === "USD_FWD") {
+            return calculateFwdPricing();
+        }
+        try {
+            const payload = buildPricingPayload();
             const endpoint = getPriceEndpoint();
             const resp = await fetch(endpoint, {
                 method: "POST",
@@ -5315,6 +5395,19 @@ document.addEventListener("DOMContentLoaded", () => {
     if (elements.btnCopyQuoteTop) {
         elements.btnCopyQuoteTop.addEventListener("click", copySwapQuoteToClipboard);
     }
+    const btnSolveRate = document.getElementById("btn-solve-rate");
+    if (btnSolveRate) btnSolveRate.addEventListener("click", solveRateFromMtm);
+    const targetMtmInput = document.getElementById("target-mtm");
+    if (targetMtmInput) {
+        targetMtmInput.addEventListener("blur", (e) => {
+            const n = parseFormattedNumber(e.target.value);
+            if (Number.isFinite(n)) e.target.value = n.toLocaleString("en-US");
+        });
+        targetMtmInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); solveRateFromMtm(); }
+        });
+    }
+
     if (elements.btnSwapCopyMessenger) {
         elements.btnSwapCopyMessenger.addEventListener("click", copySwapQuoteToClipboard);
     }

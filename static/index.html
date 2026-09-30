@@ -370,6 +370,19 @@
                                         <span class="affix">%</span>
                                     </div>
                                 </div>
+
+                                <!-- 같은 값을 반대 방향에서 묻습니다: 얼마를
+                                     받으려면 금리가 몇이어야 하는가. 마케터가
+                                     태핑할 때 필요한 쪽입니다. -->
+                                <div class="form-group solve-group">
+                                    <label for="target-mtm">Target MtM → Solve Rate</label>
+                                    <div class="solve-row">
+                                        <input type="text" id="target-mtm" placeholder="예: 2,000,000">
+                                        <button type="button" id="btn-solve-rate"
+                                                title="이 MtM 이 나오는 고정금리를 구해 위 칸에 넣습니다">금리 역산</button>
+                                    </div>
+                                    <div class="solve-out" id="solve-rate-out" hidden></div>
+                                </div>
                                 <div class="param-row-2">
                                     <div class="param-group">
                                         <label for="param-day-count">Day Count</label>
