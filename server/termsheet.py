@@ -1510,7 +1510,8 @@ def prepare_photo(raw: bytes, filename: str = "") -> Tuple[bytes, str, List[str]
 
 
 def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
-                      reviewers=None, filename: str = "") -> Dict[str, Any]:
+                      reviewers=None, filename: str = "",
+                      extra_pages: Optional[List[Tuple[bytes, str]]] = None) -> Dict[str, Any]:
     """
     Full pipeline. Extractors and reviewers are injectable so every path - including the
     two-model disagreement round - can be tested without touching an API.
@@ -1549,8 +1550,23 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
         if photo_notes:
             _log(f"[Termsheet] 사진 보정: {', '.join(photo_notes)}")
         redacted_text, redaction_counts, leaks = "", {}, []
-        trade = extractor(photo) if extractor is not None \
-            else call_vision_extractor(photo, mime, used=used)
+
+        # 뒷장들도 같은 보정을 거쳐 한 번의 호출에 함께 실립니다. Term sheet 은
+        # 여러 장으로 찍히는 일이 흔한데 - 거래조건이 1쪽, 상각 스케줄이 2쪽 -
+        # 장마다 따로 추출해 합치면 2쪽의 스케줄이 1쪽의 조건과 이어지지 않습니다.
+        pages = [(photo, mime)]
+        for extra_raw, extra_name in (extra_pages or []):
+            p_bytes, p_mime, p_notes = prepare_photo(extra_raw, extra_name)
+            if p_notes:
+                _log(f"[Termsheet] 사진 보정({extra_name}): {', '.join(p_notes)}")
+            pages.append((p_bytes, p_mime))
+
+        if extractor is not None:
+            trade = extractor(photo)
+        elif len(pages) > 1:
+            trade = call_vision_extractor(pages, mime, used=used)
+        else:
+            trade = call_vision_extractor(photo, mime, used=used)
     else:
         redacted_text, redaction_counts = redact(doc_text)
         leaks = redaction_leaks(redacted_text)

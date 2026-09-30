@@ -35,6 +35,7 @@ SUITES = [
     ("L27 Result provenance", "test_l27_provenance.py"),
     ("L28 Eikon log files", "test_l28_eikon_logs.py"),
     ("L29 Review fidelity", "test_l29_review_fidelity.py"),
+    ("L30 Solve rate from MtM", "test_l30_solve_rate.py"),
 ]
 
 total_fail = 0

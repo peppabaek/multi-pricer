@@ -218,6 +218,37 @@ def heic_bytes(width=3024, height=2268) -> bytes:
     return buf.getvalue()
 
 
+def two_page_photos():
+    """
+    두 장으로 나뉜 term sheet: 1쪽에 거래조건, 2쪽에 상각 스케줄.
+
+    실제로 흔한 모양이고, 한 장만 읽으면 반쪽짜리 답이 나옵니다. 장을 따로
+    추출해 합치는 방식으로는 2쪽의 표가 1쪽의 거래와 이어지지 않습니다.
+    """
+    from PIL import Image, ImageDraw
+
+    def render(lines, w=700, h=520):
+        img = Image.new("RGB", (w, h), "white")
+        d = ImageDraw.Draw(img)
+        y = 24
+        for text in lines:
+            d.text((24, y), text, fill="black")
+            y += 20 if text else 12
+        big = img.resize((3024, 2268), Image.LANCZOS)
+        buf = io.BytesIO()
+        big.save(buf, format="JPEG", quality=88)
+        return buf.getvalue()
+
+    page1 = ["TERM SHEET (page 1 of 2) - Amortising Interest Rate Swap", ""]
+    page1 += [f"{k}: {v}" for k, v in TERMS]
+    page1 += ["", "Amortisation schedule: see page 2"]
+
+    page2 = ["TERM SHEET (page 2 of 2) - Amortisation Schedule", "",
+             "Start Date      End Date        Notional", ""]
+    page2 += [f"{a}      {b}      {n}" for a, b, n in SCHEDULE]
+    return render(page1), render(page2)
+
+
 def scanned_pdf_bytes() -> bytes:
     """A PDF whose only content is an image - no extractable text."""
     from PIL import Image

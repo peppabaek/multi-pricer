@@ -682,6 +682,117 @@ def _apply_quote(feed, tenor: str, mid: float, bid=None, ask=None) -> bool:
     return True if result is None else bool(result)
 
 
+class SolveRateRequest(PricingRequest):
+    """가격을 주고 금리를 묻는 요청. 나머지 조건은 프라이싱과 같습니다."""
+    target_mtm: float = 0.0
+
+
+def _price_for(currency: str, req: PricingRequest) -> Dict[str, Any]:
+    """통화에 맞는 프라이싱 함수를 부른다."""
+    cur = (currency or "USD").upper()
+    fn = {"USD": calculate_pricing, "KRW": calculate_krw_pricing,
+          "KRW_KOFR": price_swap_kofr, "KRW_CRS": calculate_price_crs}.get(cur)
+    if fn is None:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 통화: {currency}")
+    out = fn(req)
+    return out.get("data", out) if isinstance(out, dict) else out
+
+
+@app.post("/api/solve-rate")
+def solve_rate(req: SolveRateRequest):
+    """
+    원하는 MtM 을 주면 그 값이 나오는 고정금리를 돌려준다.
+
+    마케터가 태핑할 때 묻는 것은 "이 금리면 얼마냐" 가 아니라 "얼마를 받으려면
+    금리가 몇이냐" 입니다. 지금까지는 쿠폰을 바꿔가며 여러 번 눌러 맞춰야 했습니다.
+
+    풀이는 반복이 필요 없습니다. NPV 는 쿠폰에 대해 정확히 선형입니다 - 실측:
+
+        par 4.7685 · annuity 4.41396 · 명목 1억
+        쿠폰을 par+50bp 로 주면 NPV -2,206,980
+        예측  -0.005 x 4.41396 x 1e8 = -2,206,980
+
+    그래서 한 번 프라이싱해 par 와 annuity 를 얻으면 금리가 바로 나옵니다.
+    부호는 포지션에 달려 있습니다(실측): 고정을 지급하면 쿠폰이 오를수록 NPV 가
+    내려가고, 수취하면 반대입니다.
+
+    닫힌 식이지만 그 값으로 한 번 더 프라이싱해서 실제 MtM 을 함께 돌려줍니다.
+    상각 스케줄이 걸려 있어도 annuity 가 이미 그것을 반영하므로 식은 그대로지만,
+    검산 없이 "이 금리면 그 가격입니다" 라고 말할 일은 아닙니다.
+    """
+    notional = float(req.notional or 0)
+    if notional <= 0:
+        raise HTTPException(status_code=400, detail="명목금액이 필요합니다")
+
+    # 1) par 와 DV01 을 얻는다. par 는 쿠폰과 무관하므로 아무 값이나 넣어도
+    #    같은 답이 나옵니다. None 을 넣지 않는 이유는 따로 있습니다: 커스텀
+    #    스케줄이 걸린 상태에서 쿠폰이 None 이면 프라이서가
+    #    "unsupported operand type(s) for /: 'NoneType' and 'float'" 로 죽습니다.
+    #    스케줄이 없을 때는 멀쩡해서 여태 드러나지 않았던 경로입니다.
+    base_req = req.model_copy(update={"fixed_coupon_pct": 0.0})
+    base = _price_for(req.currency, base_req)
+    pr = base.get("pricing_results", {})
+
+    par = (pr.get("par_swap_rate_pct")
+           or pr.get("par_krw_rate_pct") or pr.get("par_crs_rate_pct"))
+    # annuity x notional 이 아니라 DV01 을 씁니다.
+    #
+    # CRS 는 원화 다리 명목이 "USD 명목 x 환율" 이라, 요청에 실린 notional 과
+    # annuity_krw 를 곱하면 자릿수가 어긋납니다 - 실제로 금리 594%, NPV -3.6조가
+    # 나왔습니다. DV01 은 "1bp 당 NPV 변화" 라 명목도 환율도 이미 반영돼 있고,
+    # deal_npv 와 같은 통화로 떨어집니다.
+    dv01 = pr.get("dv01")
+    if dv01 is None:
+        dv01 = pr.get("krw_dv01")
+    if par is None or not dv01:
+        raise HTTPException(
+            status_code=400,
+            detail=f"이 통화에서는 par/DV01 을 얻지 못해 역산할 수 없습니다 "
+                   f"({req.currency})")
+
+    # 2) 닫힌 식. 고정 지급이면 쿠폰이 오를수록 NPV 가 내려갑니다.
+    #    DV01 은 1bp 당 변화이므로 1% 당은 x100 입니다.
+    sign = 1.0 if str(req.position or "").lower().startswith("rec") else -1.0
+    per_pct = float(dv01) * 100.0
+    coupon = par + sign * float(req.target_mtm) / per_pct
+
+    # 3) 그 금리로 다시 프라이싱해서 실제로 그 값이 나오는지 본다.
+    def _npv(c):
+        out = _price_for(req.currency, req.model_copy(update={"fixed_coupon_pct": c}))
+        p = out.get("pricing_results", {})
+        v = p.get("deal_npv")
+        return (p.get("deal_npv_krw") if v is None else v)
+
+    achieved = _npv(coupon)
+
+    # 완전히 선형이 아닌 통화가 있습니다 - KOFR 는 복리 구조라 1억 기준 약
+    # 146원이 남았습니다. 무시해도 될 크기지만, 마케터가 "이 금리면 이 금액"
+    # 이라고 말할 값이라 한 걸음 더 조입니다. 선형이라 한 번이면 충분합니다.
+    tol = max(1.0, notional * 1e-9)
+    if achieved is not None and abs(achieved - float(req.target_mtm)) > tol:
+        coupon += sign * (float(req.target_mtm) - achieved) / per_pct
+        achieved = _npv(coupon)
+
+    # 돌려줄 자리수로 먼저 자른 뒤에 검산합니다. CRS 는 DV01 이 1bp 당 6,100만원
+    # 이라, 쿠폰을 소수 6자리에서 자르는 것만으로 NPV 가 수천 원 움직입니다.
+    # 검산을 자르기 전 값으로 하면, 우리가 돌려준 금리로는 나오지 않는 MtM 을
+    # "이 금리면 이 금액" 이라고 말하게 됩니다.
+    coupon = round(coupon, 6)
+    achieved = _npv(coupon)
+
+    return {"status": "success", "data": {
+        "coupon_pct": coupon,
+        "par_swap_rate_pct": par,
+        "dv01": dv01,
+        "spread_vs_par_bp": round((coupon - par) * 100.0, 4),
+        "target_mtm": req.target_mtm,
+        "achieved_mtm": achieved,
+        # 검산 오차. 커브가 쿠폰에 따라 달라지는 구조라면 여기서 드러납니다.
+        "residual": None if achieved is None else round(achieved - req.target_mtm, 2),
+        "snapshot_info": base.get("snapshot_info"),
+    }}
+
+
 @app.post("/api/quotes/push")
 def push_relayed_quotes(req: RelayPushRequest):
     """
@@ -1416,33 +1527,54 @@ def termsheet_diagnostics():
 
 
 @app.post("/api/termsheet/extract")
-async def extract_termsheet(request: Request, file: UploadFile = File(...)):
+async def extract_termsheet(request: Request,
+                            file: Optional[UploadFile] = File(None),
+                            files: Optional[List[UploadFile]] = File(None)):
     """
     Read a termsheet, return a draft ticket for the trader to review.
 
     The document is held in memory only: identity is stripped before anything is sent
     out, and the bytes are dropped when this call returns. Nothing is written to disk.
     """
-    from server.termsheet import process_termsheet, record_failure
+    from server.termsheet import process_termsheet, record_failure, sniff_kind
+
+    # 한 장은 file, 여러 장은 files 로 옵니다. 데스크톱은 계속 file 을 보내므로
+    # 둘 다 받습니다. 순서는 사용자가 고른 순서 그대로 — 2쪽의 스케줄이 1쪽의
+    # 조건에 붙는 문서라 뒤바뀌면 안 됩니다.
+    uploads = [f for f in ([file] if file is not None else []) + list(files or []) if f]
+    if not uploads:
+        raise HTTPException(status_code=400, detail="파일이 없습니다")
 
     # No extension gate: what the file actually is decides how it is read, and a
     # marketer's attachment is as likely to be an Excel sheet or a phone photo as a PDF.
-    raw = await file.read()
+    pages: List[Tuple[bytes, str]] = []
+    for up in uploads:
+        pages.append((await up.read(), up.filename or ""))
+    file = uploads[0]
+    raw = pages[0][0]
     try:
         if not raw:
             raise HTTPException(status_code=400, detail="빈 파일입니다")
-        if len(raw) > MAX_TERMSHEET_BYTES:
+        total = sum(len(b) for b, _ in pages)
+        if total > MAX_TERMSHEET_BYTES:
             raise HTTPException(
                 status_code=400,
-                detail=f"파일이 너무 큽니다 ({len(raw)/1024/1024:.1f}MB). 최대 20MB까지 지원합니다"
+                detail=f"파일이 너무 큽니다 (총 {total/1024/1024:.1f}MB, {len(pages)}장). "
+                       f"최대 20MB까지 지원합니다"
             )
+        if len(pages) > 1 and any(b and sniff_kind(b, n) != "image"
+                                  for b, n in pages):
+            raise HTTPException(
+                status_code=400,
+                detail="여러 장은 사진만 됩니다 — PDF·엑셀은 한 번에 한 파일씩 올려주세요")
         try:
             # In a threadpool, not inline. Reading a term sheet takes 45-60 seconds
             # in the model, and awaiting nothing during it holds the event loop - the
             # server answers nothing at all meanwhile, health checks included, so the
             # host concludes the instance is dead and restarts it. That is the 502.
             result = await run_in_threadpool(
-                process_termsheet, raw, filename=file.filename or "")
+                process_termsheet, raw, filename=file.filename or "",
+                extra_pages=pages[1:] or None)
         except HTTPException:
             raise
         except ValueError as e:

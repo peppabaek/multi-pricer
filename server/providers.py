@@ -321,6 +321,22 @@ def supports_vision(name: str) -> bool:
     return name in VISION_CAPABLE
 
 
+def _pages(raw, mime):
+    """
+    (바이트, mime) 목록으로 맞춘다.
+
+    Term sheet 은 여러 장으로 찍히는 일이 흔합니다 - 거래조건이 1쪽, 상각
+    스케줄이 2쪽. 장마다 따로 추출해 합치면 2쪽의 스케줄이 1쪽의 조건과
+    이어지지 않으므로, 한 번의 호출에 전부 실어 보냅니다. 순서는 사용자가
+    고른 순서 그대로입니다.
+
+    한 장은 원소가 하나인 목록입니다 - 경로를 둘로 나누지 않기 위해서입니다.
+    """
+    if isinstance(raw, (list, tuple)):
+        return list(raw)
+    return [(raw, mime)]
+
+
 def get_vision_extractor(name: str, model_override_env: Optional[str] = None,
                          model_name: Optional[str] = None):
     """Read trade terms straight from an image or a scanned PDF."""
@@ -341,7 +357,8 @@ def get_vision_extractor(name: str, model_override_env: Optional[str] = None,
             client = genai.Client(api_key=resolve_key("gemini"))
             resp = client.models.generate_content(
                 model=resolve_model("gemini", model_override_env, model_name),
-                contents=[types.Part.from_bytes(data=raw, mime_type=mime), ask],
+                contents=[types.Part.from_bytes(data=r, mime_type=m)
+                          for r, m in _pages(raw, mime)] + [ask],
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_PROMPT,
                     response_mime_type="application/json",
@@ -355,18 +372,17 @@ def get_vision_extractor(name: str, model_override_env: Optional[str] = None,
         def extract(raw: bytes, mime: str):
             import base64, anthropic
             client = anthropic.Anthropic(api_key=resolve_key("anthropic"))
-            block = ({"type": "document",
-                      "source": {"type": "base64", "media_type": mime,
-                                 "data": base64.b64encode(raw).decode()}}
-                     if mime == "application/pdf" else
-                     {"type": "image",
-                      "source": {"type": "base64", "media_type": mime,
-                                 "data": base64.b64encode(raw).decode()}})
+            block = [
+                {"type": ("document" if m == "application/pdf" else "image"),
+                 "source": {"type": "base64", "media_type": m,
+                            "data": base64.b64encode(r).decode()}}
+                for r, m in _pages(raw, mime)]
             resp = client.messages.parse(
                 model=resolve_model("anthropic", model_override_env, model_name),
                 max_tokens=16000,
                 system=[{"type": "text", "text": SYSTEM_PROMPT}],
-                messages=[{"role": "user", "content": [block, {"type": "text", "text": ask}]}],
+                messages=[{"role": "user",
+                           "content": block + [{"type": "text", "text": ask}]}],
                 output_format=ExtractedTrade)
             return resp.parsed_output
         return extract
@@ -376,13 +392,14 @@ def get_vision_extractor(name: str, model_override_env: Optional[str] = None,
         from openai import OpenAI
         client = OpenAI(api_key=resolve_key(name) or "not-needed",
                         base_url=PROVIDERS[name].get("base_url"))
-        url = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+        images = [{"type": "image_url",
+                   "image_url": {"url": f"data:{m};base64,{base64.b64encode(r).decode()}"}}
+                  for r, m in _pages(raw, mime)]
         resp = client.chat.completions.create(
             model=resolve_model(name, model_override_env, model_name),
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": [
-                    {"type": "image_url", "image_url": {"url": url}},
+                {"role": "user", "content": images + [
                     {"type": "text",
                      "text": f"{ask}\nReturn JSON matching this schema:\n"
                              f"{ExtractedTrade.model_json_schema()}"}]},

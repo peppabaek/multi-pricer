@@ -279,9 +279,14 @@
     // "fetch error" 만 남습니다. 직접 끊고 무슨 일인지 말합니다.
     const UPLOAD_TIMEOUT_MS = 150000;
 
-    async function uploadTermsheet(file) {
-        if (!file) return;
-        const label = file.name || "문서";
+    async function uploadTermsheet(fileList) {
+        // 여러 장일 수 있습니다. 고른 순서를 그대로 보냅니다 - 2쪽의 스케줄이
+        // 1쪽의 조건에 붙는 문서라, 순서가 뒤바뀌면 조용히 틀립니다.
+        const chosen = fileList ? Array.from(fileList) : [];
+        if (!chosen.length) return;
+        const file = chosen[0];
+        const label = chosen.length > 1
+            ? `${chosen.length}장` : (file.name || "문서");
         busy(true, label + " 분석 중…");
 
         // 가만히 있는 화면은 2분이면 멈춘 것처럼 보입니다. 초를 셉니다.
@@ -296,7 +301,12 @@
         const killer = setTimeout(() => ctl.abort(), UPLOAD_TIMEOUT_MS);
         try {
             const body = new FormData();
-            body.append("file", file, file.name || "upload");
+            if (chosen.length === 1) {
+                body.append("file", file, file.name || "upload");
+            } else {
+                chosen.forEach((f, i) =>
+                    body.append("files", f, f.name || `page-${i + 1}`));
+            }
             const resp = await fetch("/api/termsheet/extract",
                                      { method: "POST", body, signal: ctl.signal });
             const json = await resp.json();
@@ -505,7 +515,7 @@
         });
 
         $("ts-btn").addEventListener("click", () => $("ts-file").click());
-        $("ts-file").addEventListener("change", (e) => uploadTermsheet(e.target.files[0]));
+        $("ts-file").addEventListener("change", (e) => uploadTermsheet(e.target.files));
         $("ts-confirm").addEventListener("click", applyTermsheet);
         $("ts-cancel").addEventListener("click", () => { tsPending = null; $("ts-modal").hidden = true; });
         $("ts-close").addEventListener("click", () => { tsPending = null; $("ts-modal").hidden = true; });

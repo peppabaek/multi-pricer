@@ -205,6 +205,127 @@ def t_11():
                 raise AssertionError(f"{name} 에 pillow-heif 가 없음")
 
 
+@case("L25-12", "여러 장을 한 문서로 읽는다")
+def t_12():
+    """
+    Term sheet 은 여러 장으로 찍히는 일이 흔합니다 - 거래조건이 1쪽, 상각
+    스케줄이 2쪽. 한 장만 읽으면 반쪽짜리 답이 나오고, 장마다 따로 추출해
+    합치면 2쪽의 표가 1쪽의 거래와 이어지지 않습니다. 한 번의 호출에 전부
+    실어 보냅니다.
+    """
+    seen = {}
+
+    def _extractor(payload):
+        seen["payload"] = payload
+        return _stub("TS-B")("")
+
+    p1, p2 = S.two_page_photos()
+    out = process_termsheet(p1, extractor=_extractor, filename="p1.jpg",
+                            extra_pages=[(p2, "p2.jpg")])
+    if not out.get("supported"):
+        raise AssertionError(f"평가 불가: {out.get('unsupported_reason')}")
+
+
+@case("L25-13", "뒷장도 같은 보정을 거친다")
+def t_13():
+    # 1쪽만 회전·축소하고 2쪽은 원본 그대로 보내면, 2쪽이 누워 있거나 한도를
+    # 넘깁니다. 모델에 실제로 전달되는 것을 봅니다.
+    sent = {}
+
+    def fake_vision(raw, mime, used=None):
+        sent["pages"] = raw
+        return _stub("TS-B")("")
+
+    import server.termsheet as T
+    saved = T.call_vision_extractor
+    T.call_vision_extractor = fake_vision
+    try:
+        big = S.phone_jpeg_bytes(4032, 3024, orientation=6)
+        T.process_termsheet(big, filename="p1.jpg",
+                            extra_pages=[(big, "p2.jpg"), (big, "p3.jpg")])
+    finally:
+        T.call_vision_extractor = saved
+
+    pages = sent.get("pages")
+    if not isinstance(pages, (list, tuple)):
+        raise AssertionError(f"여러 장인데 목록으로 전달되지 않음: {type(pages).__name__}")
+    if len(pages) != 3:
+        raise AssertionError(f"{len(pages)}장만 전달됨")
+    from PIL import Image
+    for i, (data, mime) in enumerate(pages, 1):
+        if mime != "image/jpeg" or data[:3] != b"\xff\xd8\xff":
+            raise AssertionError(f"{i}쪽이 JPEG 이 아님: {mime}")
+        if len(data) > _PHOTO_MAX_BYTES:
+            raise AssertionError(f"{i}쪽이 줄지 않음: {len(data)/1e6:.1f}MB")
+        w, h = Image.open(io.BytesIO(data)).size
+        if max(w, h) > _PHOTO_MAX_EDGE:
+            raise AssertionError(f"{i}쪽 긴 변 {max(w,h)}px")
+        if w >= h:
+            raise AssertionError(f"{i}쪽 회전 보정이 안 됨: {w}x{h}")
+
+
+@case("L25-14", "한 장일 때는 전과 똑같이 보낸다")
+def t_14():
+    # 여러 장을 지원하느라 한 장 경로가 바뀌면, 이미 돌던 것이 조용히 달라집니다.
+    sent = {}
+
+    def fake_vision(raw, mime, used=None):
+        sent["raw"] = raw
+        return _stub("TS-B")("")
+
+    import server.termsheet as T
+    saved = T.call_vision_extractor
+    T.call_vision_extractor = fake_vision
+    try:
+        T.process_termsheet(S.phone_jpeg_bytes(1400, 1050), filename="one.jpg")
+    finally:
+        T.call_vision_extractor = saved
+
+    if isinstance(sent.get("raw"), (list, tuple)):
+        raise AssertionError("한 장인데 목록으로 감 — 기존 경로가 바뀜")
+
+
+@case("L25-15", "여러 장 업로드가 엔드포인트까지 이어진다")
+def t_15():
+    from fastapi.testclient import TestClient
+    import server.termsheet as T
+    from server.app import app
+
+    got = {}
+
+    def fake(raw, mime, used=None):
+        got["n"] = len(raw) if isinstance(raw, (list, tuple)) else 1
+        return _stub("TS-B")("")
+
+    saved = T.call_vision_extractor
+    T.call_vision_extractor = fake
+    try:
+        p1, p2 = S.two_page_photos()
+        r = TestClient(app).post("/api/termsheet/extract", files=[
+            ("files", ("p1.jpg", p1, "image/jpeg")),
+            ("files", ("p2.jpg", p2, "image/jpeg"))])
+    finally:
+        T.call_vision_extractor = saved
+
+    if r.status_code != 200:
+        raise AssertionError(f"HTTP {r.status_code}: {r.text[:150]}")
+    if got.get("n") != 2:
+        raise AssertionError(f"모델에 {got.get('n')}장만 전달됨")
+
+
+@case("L25-16", "사진과 PDF 를 섞어 올리면 막는다")
+def t_16():
+    # 여러 장은 사진 경로에서만 뜻이 있습니다. PDF 를 섞으면 텍스트 경로와
+    # 이미지 경로가 한 요청에 뒤섞여, 무엇이 읽혔는지 말할 수 없게 됩니다.
+    from fastapi.testclient import TestClient
+    from server.app import app
+    r = TestClient(app).post("/api/termsheet/extract", files=[
+        ("files", ("a.jpg", S.phone_jpeg_bytes(800, 600), "image/jpeg")),
+        ("files", ("b.pdf", S.scanned_pdf_bytes(), "application/pdf"))])
+    if r.status_code == 200:
+        raise AssertionError("섞어 올렸는데 그냥 처리함")
+
+
 if __name__ == "__main__":
     print("\n=== L25 폰으로 찍은 사진 ===")
     sys.exit(1 if run_all("L25") else 0)
