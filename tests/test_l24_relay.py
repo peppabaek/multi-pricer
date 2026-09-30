@@ -416,6 +416,90 @@ def t_19():
             raise AssertionError(f"중계가 서버의 인증 변수를 읽음: {bad}")
 
 
+@case("L24-20", "중계가 보낸 bid/ask 가 그대로 반영된다")
+def t_20():
+    """
+    LSEG 의 KRWQMCD1Y=PREA 는 3.7050/3.7400 인데 배포본은 3.7125/3.7325 를
+    보여줬습니다. mid 만 우연히 같았습니다.
+
+    KRW/KOFR/FWD 의 update_quote 가 mid 만 받아서, _apply_quote 의 네 인자
+    호출이 TypeError 로 떨어진 뒤 두 인자로 다시 불렸고, 진짜 양방 호가가
+    버려진 채 피드가 ±1bp 를 지어냈습니다. 트레이더가 보는 스프레드가 실제의
+    절반이 됩니다 - 마케터가 한쪽을 부를 때 쓰는 숫자입니다.
+    """
+    import time as _t
+    from fastapi.testclient import TestClient
+    from server.app import app
+    client = TestClient(app)
+
+    cases = [("USD", "5Y", 4.5, 4.48, 4.52),
+             ("KRW", "1Y", 3.7225, 3.705, 3.74),
+             ("KOFR", "1Y", 3.10, 3.085, 3.115),
+             ("CRS", "1Y", 3.60, 3.58, 3.62)]
+    paths = {"USD": "/api/market-snapshot", "KRW": "/api/krw/market-snapshot",
+             "KOFR": "/api/kofr/market-snapshot", "CRS": "/api/crs/market-snapshot"}
+
+    # 이 PC 에는 Workspace 가 떠 있어서, 스냅샷을 읽는 순간 _warm_once 가 LSEG
+    # 에서 다시 당겨와 방금 밀어넣은 값을 덮습니다. 중계가 반영되는지 보려면
+    # 그 조회를 막아야 합니다.
+    import server.app as app_module
+    warmed_before = set(app_module._WARMED)
+    app_module._WARMED.update({"usd", "krw", "kofr", "crs", "fwd"})
+
+    for ccy, tenor, mid, bid, ask in cases:
+        r = client.post("/api/quotes/push", json={
+            "currency": ccy, "origin": "desk-test",
+            "source_epoch_ms": _t.time() * 1000,
+            "quotes": [{"tenor": tenor, "mid": mid, "bid": bid, "ask": ask}]})
+        if r.status_code != 200:
+            raise AssertionError(f"{ccy} push {r.status_code}: {r.text[:120]}")
+
+        body = client.get(paths[ccy]).json()
+        quotes = body.get("quotes") or (body.get("data") or {}).get("quotes") or []
+        row = next((q for q in quotes if str(q.get("tenor")).upper() == tenor), None)
+        if row is None:
+            raise AssertionError(f"{ccy} {tenor} 호가를 찾지 못함")
+        if abs(float(row["bid"]) - bid) > 1e-6 or abs(float(row["ask"]) - ask) > 1e-6:
+            app_module._WARMED.intersection_update(warmed_before)
+            raise AssertionError(
+                f"{ccy} {tenor}: 보낸 {bid}/{ask} 가 {row['bid']}/{row['ask']} 로 바뀜 "
+                f"— 스프레드가 지어내졌습니다")
+    app_module._WARMED.intersection_update(warmed_before)
+
+
+@case("L24-21", "bid/ask 없이 보내도 mid 는 반영된다")
+def t_21():
+    # 양방을 못 구하는 피드도 있습니다. 그때까지 막으면 안 됩니다.
+    import time as _t
+    from fastapi.testclient import TestClient
+    from server.app import app
+    client = TestClient(app)
+    r = client.post("/api/quotes/push", json={
+        "currency": "KRW", "origin": "desk-test", "source_epoch_ms": _t.time() * 1000,
+        "quotes": [{"tenor": "2Y", "mid": 3.91}]})
+    if r.status_code != 200 or r.json()["data"]["applied"] != 1:
+        raise AssertionError(f"mid 만 보냈는데 반영 실패: {r.text[:120]}")
+
+
+@case("L24-22", "모든 피드가 네 인자 갱신을 받는다")
+def t_22():
+    # 하나라도 mid 전용이면 _apply_quote 가 조용히 두 인자로 되돌아가 양방을
+    # 버립니다. 그 되돌아가는 길을 없앴으므로, 여기서 서명을 고정합니다.
+    import inspect
+    from server.tradition_feed import tradition_feed
+    from server.krw_feed import krw_feed
+    from server.kofr_feed import kofr_feed
+    from server.crs_feed import crs_feed
+    from server.kmbc_fwd_feed import kmbc_fwd_feed_instance as kmbc_fwd_feed
+
+    for name, feed in (("USD", tradition_feed), ("KRW", krw_feed),
+                       ("KOFR", kofr_feed), ("CRS", crs_feed), ("FWD", kmbc_fwd_feed)):
+        fn = getattr(feed, "update_quote", None) or getattr(feed, "update_quote_manually")
+        params = list(inspect.signature(fn).parameters)
+        if len(params) < 3:
+            raise AssertionError(f"{name}: {params} — bid/ask 를 받지 못합니다")
+
+
 if __name__ == "__main__":
     print("\n=== L24 데스크 → 클라우드 중계 ===")
     sys.exit(1 if run_all("L24") else 0)

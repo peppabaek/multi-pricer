@@ -658,13 +658,17 @@ def _apply_quote(feed, tenor: str, mid: float, bid=None, ask=None) -> bool:
     """
     한 건을 피드에 반영하고, 실제로 반영됐는지 돌려준다.
 
-    피드마다 갱신 메서드의 이름과 인자 수가 다르다. tradition_feed 는
-    (tenor, mid, bid, ask), KRW/KOFR/FWD 는 (tenor, mid) 뿐이고, CRS 는 이름부터
-    update_quote_manually 다. 중계는 이 차이를 알 필요가 없으므로 여기서 흡수한다 -
-    맞추지 않았을 때 KOFR 가 매 주기마다 19건씩 실패했다.
+    피드마다 갱신 메서드의 이름이 다르다 - CRS 만 update_quote_manually 다.
+    중계는 그 차이를 알 필요가 없으므로 여기서 흡수한다.
 
     모르는 테너는 대부분의 피드가 조용히 무시하고 아무것도 돌려주지 않는다. 그걸
     성공으로 세면 '31건 반영'이라 보고하면서 실제로는 한 건도 안 바뀔 수 있다.
+
+    bid/ask 는 반드시 함께 넘긴다. 전에는 KRW/KOFR/FWD 의 update_quote 가 mid 만
+    받아서 TypeError 로 떨어진 뒤 2인자로 다시 불렀는데, 그러면 LSEG 에서 받은
+    실제 양방 호가가 버려지고 피드가 ±1bp 를 지어냈다. 배포본의 KRWQMCD1Y=PREA
+    가 3.7125/3.7325 로 보인 이유다 - 진짜 호가는 3.7050/3.7400 이었고 mid 만
+    우연히 같았다. 이제 모든 피드가 네 인자를 받으므로 되돌아갈 자리가 없다.
     """
     fn = getattr(feed, "update_quote", None) or getattr(feed, "update_quote_manually", None)
     if fn is None:
@@ -675,10 +679,12 @@ def _apply_quote(feed, tenor: str, mid: float, bid=None, ask=None) -> bool:
         if tenor.strip().upper() not in {str(k).strip().upper() for k in known}:
             return False
 
+    # source 를 알려 마지막 틱이 "(Manual)" 로 찍히지 않게 한다 - 중계로 들어온
+    # 값을 사람이 손으로 넣은 것처럼 보이게 하면 안 된다.
     try:
-        result = fn(tenor, mid, bid, ask)
+        result = fn(tenor, mid, bid, ask, source="Relay")
     except TypeError:
-        result = fn(tenor, mid)
+        result = fn(tenor, mid, bid, ask)
     return True if result is None else bool(result)
 
 

@@ -191,15 +191,23 @@ class KMBCFwdFeed:
                 "timestamp": self.last_update.strftime("%Y-%m-%d %H:%M:%S")
             }
 
-    def update_quote(self, tenor: str, new_mid: float) -> bool:
+    def update_quote(self, tenor: str, new_mid: float,
+                     new_bid=None, new_ask=None, source: str = "Manual") -> bool:
+        """스왑포인트도 양방이 오면 그대로 받습니다. 인자만 받고 버리지 않도록."""
         with self._lock:
             if tenor == "SPOT_FX" or tenor == "SPOT":
                 self.spot_fx = float(new_mid)
-                self.spot_fx_tick = datetime.datetime.now().strftime("%H:%M:%S") + " (Manual)"
+                self.spot_fx_tick = (
+                    datetime.datetime.now().strftime("%H:%M:%S") + f" ({source})")
                 return True
             if tenor in self.quotes:
                 self.quotes[tenor]["mid"] = float(new_mid)
-                self.quotes[tenor]["last_tick"] = datetime.datetime.now().strftime("%H:%M:%S") + " (Manual)"
+                if new_bid is not None:
+                    self.quotes[tenor]["bid"] = float(new_bid)
+                if new_ask is not None:
+                    self.quotes[tenor]["ask"] = float(new_ask)
+                self.quotes[tenor]["last_tick"] = (
+                    datetime.datetime.now().strftime("%H:%M:%S") + f" ({source})")
                 return True
         return False
 

@@ -190,19 +190,34 @@ class KRWMarketFeed:
                 "quotes": ordered_quotes
             }
 
-    def update_quote(self, tenor: str, new_mid: float) -> bool:
+    def update_quote(self, tenor: str, new_mid: float,
+                     new_bid=None, new_ask=None, source: str = "Manual") -> bool:
+        """
+        호가 하나를 갈아끼운다.
+
+        bid/ask 를 주면 그대로 씁니다. 중계는 LSEG 에서 받은 실제 양방 호가를
+        보내는데, 이 함수가 mid 만 받던 탓에 인자가 맞지 않아 버려지고 ±1bp 를
+        지어냈습니다. 배포본의 1Y 가 3.7125/3.7325 로 보인 이유입니다 - LSEG 와
+        Murex 는 3.7050/3.7400 이었고, mid 만 우연히 같았습니다.
+
+        source 는 마지막 틱에 찍힙니다. 중계로 들어온 값을 "Manual" 이라고 하면
+        사람이 손으로 넣은 것처럼 읽힙니다.
+        """
         with self._lock:
             t = tenor.strip().upper()
             if t in self._quotes:
                 prev = self._quotes[t]["prev_close"]
+                # 준 값이 있으면 그것이 진실입니다. 없을 때만 벌립니다.
                 spread_half = 0.0100
+                bid = float(new_bid) if new_bid is not None else new_mid - spread_half
+                ask = float(new_ask) if new_ask is not None else new_mid + spread_half
                 self._quotes[t].update({
-                    "bid": round(new_mid - spread_half, 4),
-                    "ask": round(new_mid + spread_half, 4),
+                    "bid": round(bid, 4),
+                    "ask": round(ask, 4),
                     "mid": round(new_mid, 4),
                     "chg_bp": round((new_mid - prev) * 100.0, 2),
-                    "is_overridden": True,
-                    "last_tick": datetime.datetime.now().strftime("%H:%M:%S") + " (Manual)"
+                    "is_overridden": source == "Manual",
+                    "last_tick": datetime.datetime.now().strftime("%H:%M:%S") + f" ({source})"
                 })
                 self._last_update_ts = datetime.datetime.now()
                 return True
