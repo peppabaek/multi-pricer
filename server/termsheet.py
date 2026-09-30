@@ -1662,7 +1662,12 @@ def process_termsheet(raw: bytes, extractor=None, second_extractor=None,
 
     unmapped = normalize_enums(trade)
     # Quotes are checked against the redacted text - that is what the model actually saw.
-    unverified = verify_quotes(trade, redacted_text)
+    #
+    # 사진에는 대조할 텍스트가 없습니다. 그대로 돌리면 모든 필드가 "근거를 찾지
+    # 못했다" 로 떨어져, 검토 창의 11개 항목이 전부 빨갛게 표시됩니다. 전부
+    # 경고면 아무것도 경고가 아니고, 진짜 의심스러운 필드가 묻힙니다.
+    # 사진이라는 사실은 아래에서 한 줄로 따로 말합니다.
+    unverified = [] if by_vision else verify_quotes(trade, redacted_text)
 
     warnings: List[str] = []
     warnings += check_dates(trade)

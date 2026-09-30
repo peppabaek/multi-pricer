@@ -364,6 +364,54 @@ def t_16():
             os.environ["GROQ_MODEL"] = saved
 
 
+@case("L29-17", "사진에는 인용문 검증을 돌리지 않는다")
+def t_17():
+    """
+    verify_quotes 는 각 필드의 근거 인용문을 문서 텍스트에서 찾습니다. 사진
+    경로에는 그 텍스트가 없어(redacted_text = ""), 모든 필드가 "근거를 찾지
+    못했다" 로 떨어졌습니다 - 검토 창 11개 항목이 전부 빨간색이 됐습니다.
+
+    전부 경고면 아무것도 경고가 아닙니다. 진짜 의심스러운 필드가 묻힙니다.
+    """
+    import sample_formats as SF
+    import server.termsheet as T
+    from test_l11_scenarios import _stub
+
+    out = T.process_termsheet(
+        SF.phone_jpeg_bytes(1400, 1050),
+        extractor=lambda payload: _stub("TS-B")(""),
+        filename="IMG.JPG")
+
+    if out.get("unverified_fields"):
+        raise AssertionError(
+            f"사진인데 {len(out['unverified_fields'])}개 필드를 '근거 확인 실패' 로 "
+            f"표시 — 대조할 텍스트가 없습니다")
+    noisy = [w for w in (out.get("warnings") or []) if "근거 인용문" in w]
+    if noisy:
+        raise AssertionError(f"근거 관련 경고가 {len(noisy)}건 남음")
+
+    # 대신 사진이라는 사실은 한 번 말해야 합니다.
+    if not any("이미지" in w or "스캔" in w for w in (out.get("warnings") or [])):
+        raise AssertionError("사진으로 읽었다는 사실을 알리지 않음")
+
+
+@case("L29-18", "텍스트에서는 인용문 검증이 계속 돈다")
+def t_18():
+    # 사진을 건너뛰느라 텍스트까지 끄면, 근거 없는 값을 걸러낼 장치가 사라집니다.
+    with io.open(os.path.join(ROOT, "server", "termsheet.py"), encoding="utf-8") as f:
+        src = f.read()
+    if "verify_quotes(trade, redacted_text)" not in src:
+        raise AssertionError("인용문 검증이 통째로 사라짐")
+    # verify_quotes 를 부르는 그 줄을 봅니다 - 같은 이름의 다른 대입이 앞에 있어
+    # 첫 번째만 보면 엉뚱한 줄을 검사하게 됩니다.
+    line = next((ln for ln in src.splitlines()
+                 if "unverified = " in ln and "verify_quotes" in ln), None)
+    if line is None:
+        raise AssertionError("verify_quotes 를 쓰는 대입을 찾지 못함")
+    if "by_vision" not in line:
+        raise AssertionError(f"사진 여부로 가르지 않음: {line.strip()[:80]}")
+
+
 if __name__ == "__main__":
     print("\n=== L29 검토 창 정확도 ===")
     sys.exit(1 if run_all("L29") else 0)
