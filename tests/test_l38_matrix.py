@@ -31,6 +31,40 @@ def t_l3_2():
             raise AssertionError(f"freq {freq}: expected {n} periods, got {got}")
 
 
+@case("L3-10", "an anniversary on a weekend does not add an empty period")
+def t_l3_10():
+    """
+    The maturity handed to generate_schedule has already been rolled to a
+    business day, but the regular roll dates have not. When the last regular
+    roll lands on a weekend it rolls onto the same day as maturity, and a
+    period of zero length used to be emitted after it. It carries no accrual
+    and no principal, so it changes no number - but it is one row more than
+    the trader counted, and whether it appeared depended on today's date.
+
+    2026-10-05 + 5Y is Sunday 2031-10-05, which is exactly that case.
+    """
+    import datetime
+    from server.calendar_manager import generate_schedule, apply_convention
+
+    eff = datetime.date(2026, 10, 5)
+    unadj = datetime.date(2031, 10, 5)            # a Sunday
+    mat = apply_convention(unadj, "Modified Following", "NYB")
+    if mat == unadj:
+        raise AssertionError("fixture no longer rolls - pick another date")
+
+    for months, n in ((12, 5), (6, 10), (3, 20)):
+        rows = generate_schedule(eff, mat, frequency_months=months,
+                                 business_day_conv="Modified Following",
+                                 pay_cal="NYB")
+        if len(rows) != n:
+            raise AssertionError(f"{months}M: expected {n} periods, got {len(rows)}")
+        empty = [(r[3], r[4]) for r in rows if r[4] <= r[3]]
+        if empty:
+            raise AssertionError(f"{months}M: zero-length period {empty}")
+        if rows[-1][1] != mat:
+            raise AssertionError(f"{months}M: ends {rows[-1][1]}, not {mat}")
+
+
 @case("L3-3", "day count conventions produce distinct accrual fractions")
 def t_l3_3():
     seen = {}

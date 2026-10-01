@@ -165,9 +165,12 @@ def t_8():
     p2, _ = price(sheet(PHASE2, numbered=False))
     whole, _ = price(whole_sheet())
 
+    # dv01 is reported rounded to the cent, so three reported figures can
+    # disagree by a cent and a half on quantisation alone. A split that really
+    # lost a period would be out by thousands - L17-9 measures that.
     for key in ("dv01",):
         split = p1[key] + p2[key]
-        if abs(whole[key] - split) > max(1e-6, abs(split) * 1e-9):
+        if abs(whole[key] - split) > max(0.015, abs(split) * 1e-9):
             raise AssertionError(f"{key}: whole {whole[key]:,.4f} vs split {split:,.4f}")
 
     npv_key = next((k for k in ("net_present_value", "npv", "deal_npv") if k in p1), None)

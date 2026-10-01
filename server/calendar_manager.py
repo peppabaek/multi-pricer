@@ -390,6 +390,12 @@ def generate_schedule(
         calc_st = a_st if is_adjusted else u_st
         calc_ed = a_ed if is_adjusted else u_ed
         
+        # 만기일은 이미 영업일로 밀려서 들어옵니다. 마지막 정기 롤날짜가
+        # 주말이라 같은 날로 밀리면 길이 0일인 기간이 하나 더 섭니다.
+        # 이자도 원금도 없는 행이라 빼도 값은 같고, 다음 기간의 시작이 앞
+        # 기간의 끝과 같아 이어짐도 깨지지 않습니다.
+        if calc_ed <= calc_st:
+            continue
         periods.append((a_st, a_ed, pay_dt, calc_st, calc_ed, u_st, u_ed))
         
     return periods
