@@ -58,9 +58,9 @@ class KRWSwapPricer:
         fixed_coupon_pct: float = 3.8475,
         spread_bp: float = 0.0,
         first_fixing_pct: Optional[float] = None,
-        # CD 91D 는 3개월짜리 금리입니다. 지급주기가 월별이든 분기별이든, 한
-        # 번 고정되는 것은 언제나 3개월 금리입니다. None 이면 지급기간으로 잡습니다.
-        leg2_index_tenor_months: Optional[int] = 3,
+        # 기본은 지급기간입니다 - 일정표와 커브만으로 계산합니다. 지수가 지급기간보다
+        # 길게 고정되는 거래라고 데스크가 판단한 때만 개월 수를 줄니다.
+        leg2_index_tenor_months: Optional[int] = None,
         effective_date: Optional[datetime.date] = None,
         maturity_date: Optional[datetime.date] = None,
         tenor_str: str = "3Y",
