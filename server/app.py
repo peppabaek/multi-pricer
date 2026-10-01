@@ -2066,7 +2066,29 @@ if __name__ == "__main__":
     # "이미 실행 중" 으로 판단해 건너뛰고, 아무도 관리하지 않는 고아 프로세스가
     # 호가를 서빙하게 됩니다. 실제로 그렇게 됐습니다.
     reload = os.environ.get("PRICER_RELOAD", "").strip().lower() in ("1", "true", "yes")
-    uvicorn.run("server.app:app",
-                host="0.0.0.0" if hosted else "127.0.0.1",
-                port=port, reload=reload)
+    host = "0.0.0.0" if hosted else "127.0.0.1"
+
+    # 포트가 이미 쓰이고 있으면 먼저 말하고 끝냅니다.
+    #
+    # 그냥 두면 uvicorn 이 nest_asyncio 를 거쳐 asyncio 로 올라가는 25줄짜리
+    # 트레이스백을 뱉고 SystemExit: 1 로 끝납니다. 우리 코드는 한 줄도 없는데
+    # 터미널에는 크래시처럼 보이고, 진짜 이유인 [Errno 10048] 한 줄은 맨 위로
+    # 밀려 올라가 눈에 띄지 않습니다.
+    #
+    # 로그온할 때 뜨는 자동 실행이 이미 8000 을 잡고 있는 것이 거의 항상
+    # 원인입니다 - 창을 숨겨 놓았으니 돌고 있는 줄 모르기 쉽습니다.
+    if not hosted:
+        import socket as _socket
+        with _socket.socket() as _probe:
+            _probe.settimeout(0.5)
+            if _probe.connect_ex((host, port)) == 0:
+                print(
+                    f"\n[중단] {host}:{port} 을 이미 누가 쓰고 있습니다.\n"
+                    f"  로그온 시 자동 실행된 프라이서일 가능성이 큽니다 (창은 숨겨져 있습니다).\n"
+                    f"  확인 : powershell -ExecutionPolicy Bypass -File tools\\install_autostart.ps1 -Status\n"
+                    f"  대시보드는 이미 http://{host}:{port}/ 에서 돌고 있습니다.\n"
+                    f"  따로 띄우려면 다른 포트로: PORT=8001 python server/app.py\n")
+                raise SystemExit(1)
+
+    uvicorn.run("server.app:app", host=host, port=port, reload=reload)
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             

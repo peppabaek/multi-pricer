@@ -315,6 +315,62 @@ def t_13():
         raise AssertionError("프라이서와 중계 둘 다 숨기지 않음")
 
 
+@case("L22-14", "포트가 막혀 있으면 한눈에 읽히게 말한다")
+def t_14():
+    """
+    `python server/app.py` 는 거의 항상 포트 충돌로 실패합니다 - 로그온 시
+    자동 실행된 프라이서가 이미 8000 을 잡고 있고, 창을 숨겨 놓았으니 돌고
+    있는 줄 모르기 쉽습니다.
+
+    그대로 두면 uvicorn 이 nest_asyncio 를 거쳐 asyncio 로 올라가는 25줄짜리
+    트레이스백을 뱉고 SystemExit: 1 로 끝납니다. 우리 코드는 한 줄도 없는데
+    터미널에는 크래시처럼 보이고, 진짜 이유인 [Errno 10048] 은 맨 위로 밀려
+    올라갑니다.
+    """
+    import socket
+
+    port = 8207
+    env = dict(os.environ, PRICER_NO_LOCAL_FEED="1", PORT=str(port))
+    first = subprocess.Popen([sys.executable, os.path.join(ROOT, "server", "app.py")],
+                             cwd=ROOT, env=env,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            with socket.socket() as s:
+                s.settimeout(1)
+                if s.connect_ex(("127.0.0.1", port)) == 0:
+                    break
+            time.sleep(0.5)
+        else:
+            raise AssertionError("첫 번째가 뜨지 않아 검사할 수 없음")
+
+        second = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "server", "app.py")],
+            cwd=ROOT, env=env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=120)
+    finally:
+        first.terminate()
+        try:
+            first.wait(timeout=15)
+        except Exception:
+            first.kill()
+
+    out = (second.stdout or "") + (second.stderr or "")
+    if second.returncode == 0:
+        raise AssertionError("포트가 막혔는데 성공으로 끝남")
+    if "Traceback" in out:
+        raise AssertionError(f"트레이스백이 그대로 노출됨:\n{out[-400:]}")
+    if str(port) not in out:
+        raise AssertionError(f"어느 포트인지 말하지 않음:\n{out[-300:]}")
+    if "PORT=" not in out:
+        raise AssertionError(f"어떻게 하라는 안내가 없음:\n{out[-300:]}")
+    # 길면 다시 묻히게 됩니다.
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    if len(lines) > 12:
+        raise AssertionError(f"출력이 {len(lines)}줄 — 원인이 또 묻힙니다")
+
+
 if __name__ == "__main__":
     print("\n=== L22 기동 로그 ===")
     sys.exit(1 if run_all("L22") else 0)
