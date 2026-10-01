@@ -22,10 +22,13 @@ DF 는 과거 날짜에서 1.0 으로 잘리는데 tau 는 기간 전체를 세�
 주어진 fixing 을 먼저 쓰고, 없으면 같은 길이의 기간을 spot 에서 끊어 추정합니다.
 """
 import datetime
+import io
 import os
 import sys
 
 from harness import case, run_all
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 from fastapi.testclient import TestClient
 from server.app import app
@@ -193,6 +196,71 @@ def t_7():
         raise AssertionError(f"기간 길이 30일이 아닌 {seen['span']}일로 읽음")
     if seen["start"] != c.settle_date:
         raise AssertionError(f"spot({c.settle_date}) 가 아닌 {seen['start']} 에서 읽음")
+
+
+# --------------------------------------------- 거래조건서에서 읽어 오는 경로
+
+@case("L32-8", "추출 스키마와 프롬프트가 최초 변동금리를 안다")
+def t_8():
+    from server.termsheet import ExtractedTrade, SYSTEM_PROMPT
+
+    t = ExtractedTrade(supported=True, currency="KRW", first_fixing_pct=3.55)
+    if t.first_fixing_pct != 3.55:
+        raise AssertionError("스키마가 값을 버림")
+    if "first_fixing_pct" not in SYSTEM_PROMPT:
+        raise AssertionError("프롬프트가 이 필드를 설명하지 않음 - 모델이 채울 리 없음")
+    # 고정쿠폰과 헷갈리지 말라고 명시해야 합니다. 거래조건서에 가장 크게
+    # 적힌 숫자가 고정금리라, 그냥 두면 그쪽을 집어 옵니다.
+    if "fixed_coupon_pct" not in SYSTEM_PROMPT.split("first_fixing_pct", 1)[1][:800]:
+        raise AssertionError("고정쿠폰과 구분하라는 지시가 없음")
+
+
+@case("L32-9", "읽은 값이 티켓 초안에 실린다")
+def t_9():
+    from server.termsheet import ExtractedTrade, to_ticket_draft
+
+    d = to_ticket_draft(ExtractedTrade(supported=True, currency="KRW",
+                                       first_fixing_pct=3.55))
+    if d["draft"].get("firstFixing") != "3.5500":
+        raise AssertionError(f"초안에 없음: {d['draft'].get('firstFixing')!r}")
+    if "first_fixing_pct" in d["inferred_fields"]:
+        raise AssertionError("문서에서 읽었는데 '시장 관행 적용'으로 표시")
+
+    # 문서가 말하지 않으면 빈 칸입니다. 지어낸 숫자가 들어가면 서버의 추정을
+    # 밀어내고 첫 쿠폰을 그대로 결정해 버립니다.
+    d2 = to_ticket_draft(ExtractedTrade(supported=True, currency="KRW"))
+    if d2["draft"].get("firstFixing") not in ("", None):
+        raise AssertionError(f"없는 값을 지어냄: {d2['draft'].get('firstFixing')!r}")
+
+
+@case("L32-10", "초안의 키 이름을 화면 세 곳이 똑같이 쓴다")
+def t_10():
+    """
+    초안은 firstFixing, 요청은 first_fixing_pct 입니다. 둘을 잇는 곳이 세
+    군데라 한 곳만 철자가 어긋나도 값이 조용히 사라집니다 - 화면은 멀쩡히
+    돌고 가격만 틀립니다.
+    """
+    from server.termsheet import ExtractedTrade, to_ticket_draft
+
+    key = next(k for k in to_ticket_draft(
+        ExtractedTrade(supported=True, currency="KRW", first_fixing_pct=3.55)
+    )["draft"] if k == "firstFixing")
+
+    for name in ("app.js", "pricing-core.js"):
+        with io.open(os.path.join(ROOT, "static", name), encoding="utf-8") as f:
+            js = f.read()
+        if key not in js:
+            raise AssertionError(f"{name} 이 초안 키 '{key}' 를 모름")
+        if "first_fixing_pct" not in js:
+            raise AssertionError(f"{name} 이 요청 필드를 싣지 않음")
+
+    with io.open(os.path.join(ROOT, "static", "app.js"), encoding="utf-8") as f:
+        js = f.read()
+    # 데스크톱은 티켓에서 읽어 요청에 넣습니다. 양쪽 다 있어야 이어집니다.
+    if "t.firstFixing" not in js:
+        raise AssertionError("app.js 가 티켓에서 firstFixing 을 읽지 않음")
+    if "first_fixing_pct: firstFixingPct()" not in js:
+        raise AssertionError("app.js 가 요청에 first_fixing_pct 를 넣지 않음")
 
 
 if __name__ == "__main__":

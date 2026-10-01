@@ -638,6 +638,10 @@ class ExtractedTrade(BaseModel):
     tenor: Optional[str] = None
     fixed_coupon_pct: Optional[float] = None
     spread_bp: Optional[float] = None
+    # The rate already fixed for the first floating period, when the document
+    # states it. A trade whose effective date has passed has one, and without
+    # it the curve cannot recover it - see floating_rate_for_period.
+    first_fixing_pct: Optional[float] = None
 
     crs_swap_type: Optional[Literal["Vanilla", "Fixed-Fixed"]] = None
     usd_fixed_coupon_pct: Optional[float] = None
@@ -695,7 +699,15 @@ Rules:
 6. Amortising, accreting or step-up structures: return every period in leg1_custom_schedule
    (and leg2_custom_schedule if the legs differ). Dates as YYYY-MM-DD.
 
-7. supported=false is ONLY for a product this pricer cannot value: callable,
+7. first_fixing_pct: the rate already set for the FIRST floating period, if the
+   document states it. Korean termsheets print it as 최초 변동금리, 고시금리,
+   적용금리 or 최초 CD금리; English ones as Initial Fixing, First Fixing or
+   Initial Floating Rate. It is a percent per annum and it is NOT the fixed
+   coupon - do not copy fixed_coupon_pct into it, and leave it null if the
+   document only states the fixed rate. If a schedule table carries a rate
+   column for the floating leg, the first row's rate is this value.
+
+8. supported=false is ONLY for a product this pricer cannot value: callable,
    cancellable, CMS-linked, range accrual, or any optionality. Nothing else.
 
    In particular, NEVER set supported=false because:
@@ -707,12 +719,12 @@ Rules:
    In all of those cases set supported=true, extract what the document does state,
    and put your doubt in open_questions. Do not force a trade into a vanilla shape.
 
-8. A workbook may carry several sheets. Extract the one that describes the trade
+9. A workbook may carry several sheets. Extract the one that describes the trade
    being priced - normally the longest schedule, or the one whose dates agree with
    the stated effective and maturity dates. Do not merge two schedules. Name the
    other sheets in open_questions so the trader can say which is right.
 
-8. Put anything the trader should confirm with the counterparty into open_questions.
+10. Put anything the trader should confirm with the counterparty into open_questions.
 
 Dates must be YYYY-MM-DD. Rates are percent per annum. Spreads are basis points."""
 
@@ -1294,6 +1306,10 @@ def to_ticket_draft(trade: ExtractedTrade) -> Dict[str, Any]:
         "maturityDate": trade.maturity_date or "",
         "coupon": f"{trade.fixed_coupon_pct:.4f}" if trade.fixed_coupon_pct is not None else "",
         "spreadBp": f"{trade.spread_bp:.1f}" if trade.spread_bp is not None else "0.0",
+        # 문서가 말해주지 않으면 빈 칸입니다. 지어내면 안 됩니다 - 여기에 들어간
+        # 숫자는 커브를 제치고 첫 쿠폰을 그대로 결정합니다.
+        "firstFixing": (f"{trade.first_fixing_pct:.4f}"
+                        if trade.first_fixing_pct is not None else ""),
         "crsSwapType": trade.crs_swap_type or "Vanilla",
         "usdFixedCoupon": (f"{trade.usd_fixed_coupon_pct:.4f}"
                            if trade.usd_fixed_coupon_pct is not None else "3.5000"),

@@ -3029,3 +3029,19 @@ select:focus {
     border-radius: 3px;
     padding: 1px 5px;
 }
+
+/* 선도금리가 아닌 행에 붙는 출처 표시. 숫자 칸이라 좀고,
+   숫자를 밀어내지 않게 줄바꿈을 막고 작게 붙입니다. */
+.rate-src {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 4px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 15px;
+    white-space: nowrap;
+    vertical-align: 1px;
+}
+.rate-src--fixing { color: #065f46; background: #d1fae5; }
+.rate-src--estimated { color: #b45309; background: #fef3c7; }

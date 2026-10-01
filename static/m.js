@@ -396,6 +396,7 @@
         ["product", "상품"], ["position", "포지션"], ["notionalDisplay", "명목"],
         ["customTenorInput", "테너"], ["effectiveDate", "개시일"],
         ["maturityDate", "만기일"], ["coupon", "쿠폰(%)"], ["spreadBp", "스프레드(bp)"],
+        ["firstFixing", "최초 변동금리(%)"],
         ["crsSwapType", "CRS 유형"],
     ];
     const CONV_ROWS = [

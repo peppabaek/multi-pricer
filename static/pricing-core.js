@@ -53,6 +53,7 @@
         notionalDisplay: "notional", customTenorInput: "tenor",
         effectiveDate: "effective_date", maturityDate: "maturity_date",
         coupon: "fixed_coupon_pct", spreadBp: "spread_bp", position: "position",
+        firstFixing: "first_fixing_pct",
         leg1DayCount: "leg1_day_count", leg1PaymentFreq: "leg1_payment_freq",
         leg1Convention: "leg1_business_day_conv", leg1Stub: "leg1_stub_rule",
         leg1Adjust: "leg1_adjust_rule", leg1PayCal: "leg1_calendar",
@@ -164,6 +165,9 @@
             o.raw_paste_text = t.rawPasteText;
             o.leg1_raw_paste_text = t.rawPasteText;
         }
+        // 이미 시작된 첫 변동기간의 고시금리. 없으면 서버가 커브에서
+        // 추정하고 그렇다고 표시합니다.
+        if (t.firstFixing) o.first_fixing_pct = numOrNull(t.firstFixing);
         if (t.usdFixedCoupon) o.usd_fixed_coupon_pct = numOrNull(t.usdFixedCoupon);
         if (t.crsSwapType) o.crs_swap_type = t.crsSwapType;
         return o;

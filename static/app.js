@@ -1510,6 +1510,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 position: position,
                 fixed_coupon_pct: fixedCoupon,
                 spread_bp: spreadBp,
+                first_fixing_pct: firstFixingPct(),
                 tenor: tenor,
                 effective_date: effDate || null,
                 maturity_date: matDate || null,
@@ -1752,6 +1753,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 position: position,
                 fixed_coupon_pct: null, // Initial reload pricing auto-calculates at Par swap rate (Deal NPV = 0)
                 spread_bp: spreadBp,
+                first_fixing_pct: firstFixingPct(),
                 tenor: tenor,
                 effective_date: effDate || null,
                 maturity_date: matDate || null,
@@ -2055,12 +2057,14 @@ document.addEventListener("DOMContentLoaded", () => {
         leg2DayCount: "Leg2 이자계산", leg2PaymentFreq: "Leg2 지급주기",
         leg2Convention: "Leg2 영업일규칙", leg2Stub: "Leg2 스텁", leg2Adjust: "Leg2 조정",
         leg2Cal: "Leg2 캘린더", fixDay: "픽싱 오프셋", rawPasteText: "커스텀 스케줄",
+        firstFixing: "최초 변동금리(고시)",
     };
     // draft key -> the extractor's field name, so inferred/unverified flags line up
     const TS_FIELD_KEY = {
         notionalDisplay: "notional", customTenorInput: "tenor",
         effectiveDate: "effective_date", maturityDate: "maturity_date",
         coupon: "fixed_coupon_pct", spreadBp: "spread_bp", position: "position",
+        firstFixing: "first_fixing_pct",
         leg1DayCount: "leg1_day_count", leg1PaymentFreq: "leg1_payment_freq",
         leg1Convention: "leg1_business_day_conv", leg1Stub: "leg1_stub_rule",
         leg1Adjust: "leg1_adjust_rule", leg1PayCal: "leg1_calendar",
@@ -3052,6 +3056,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 const frac = p.day_count_fraction !== undefined ? p.day_count_fraction : (p.fraction !== undefined ? p.fraction : 0.5);
                 const spread = p.spread_bp ? parseFloat(p.spread_bp) : 0.0;
                 const allInRate = fwdVal + (spread / 100.0);
+                // 이미 시작된 기간의 금리는 선도금리가 아닙니다. 어디서 온
+                // 숫자인지 말하지 않으면 trader 가 커브에서 나온 것으로 읽습니다.
+                const SRC = {
+                    Fixing: ["고시", "거래조건서에 적힌 고시금리"],
+                    Estimated: ["추정", "이미 시작된 기간 — 같은 길이의 기간을 spot 에서 읽은 추정치"],
+                };
+                const src = SRC[p.rate_source];
+                const srcTag = src
+                    ? ` <span class="rate-src rate-src--${p.rate_source.toLowerCase()}" title="${src[1]}">${src[0]}</span>`
+                    : "";
 
                 tr.innerHTML = `
                     <td class="col-center"><strong>P${p.period_no}</strong></td>
@@ -3060,7 +3074,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     <td class="col-center"><strong>${p.pay_date}</strong></td>
                     <td class="num">${formatCurrency(notional, isCrs ? false : isKrw)}</td>
                     <td class="num">${frac.toFixed(6)}</td>
-                    <td class="num"><strong>${fwdVal.toFixed(6)}%</strong></td>
+                    <td class="num"><strong>${fwdVal.toFixed(6)}%</strong>${srcTag}</td>
                     <td class="num">${spread.toFixed(2)}</td>
                     <td class="num"><strong>${allInRate.toFixed(6)}%</strong></td>
                     <td class="num">${formatCurrency(cf, isCrs ? false : isKrw)}</td>
@@ -4909,6 +4923,21 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!ticketsStore[curr]) return null;
         const activeId = activeTicketIdByProduct[curr];
         return ticketsStore[curr].find(t => t.id === activeId) || ticketsStore[curr][0] || null;
+    }
+
+    /**
+     * 이미 시작된 첫 변동기간의 고시금리.
+     *
+     * 거래조건서에 적혀 있으면 AI 가 읽어 티켓에 담아둡니다. 없으면
+     * null 로 보내 서버가 커브에서 추정하게 둡니다 - 지어낸 숫자를
+     * 보내면 첫 쿠폰이 그대로 결정되므로 빈 값이 낫습니다.
+     */
+    function firstFixingPct() {
+        const t = getActiveTicket();
+        const v = t && t.firstFixing;
+        if (v === undefined || v === null || v === "") return null;
+        const n = parseFloat(v);
+        return isNaN(n) ? null : n;
     }
 
     // loadTicketToUI writes the form, and some of the setters it calls save the form
