@@ -38,7 +38,7 @@ SUITES = [
     ("L30 Solve rate from MtM", "test_l30_solve_rate.py"),
     ("L31 Stub amortiser", "test_l31_stub_amortiser.py"),
     ("L32 Started floating period", "test_l32_started_period.py"),
-    ("L33 Floating index tenor", "test_l33_index_tenor.py"),
+    ("L33 Reset tenor + index basis", "test_l33_reset_tenor.py"),
 ]
 
 total_fail = 0

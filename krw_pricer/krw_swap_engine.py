@@ -58,9 +58,14 @@ class KRWSwapPricer:
         fixed_coupon_pct: float = 3.8475,
         spread_bp: float = 0.0,
         first_fixing_pct: Optional[float] = None,
-        # 기본은 지급기간입니다 - 일정표와 커브만으로 계산합니다. 지수가 지급기간보다
-        # 길게 고정되는 거래라고 데스크가 판단한 때만 개월 수를 줄니다.
-        leg2_index_tenor_months: Optional[int] = None,
+        # Reset tenor. KRW CD 91D 는 지급이 월별이든 분기별이든 매번 3개월 CD
+        # 금리로 고정됩니다 - Murex 의 Reset 3M / Pay 1M 이 그것입니다.
+        # None 을 주면 지급기간으로 잡습니다.
+        leg2_reset_tenor_months: Optional[int] = 3,
+        # CD 91D 가 고시되는 기준. 발생이자 기준(leg2_day_count)과 다릅니다 -
+        # 이자를 30/360 으로 붙이는 거래도 금리 자체는 Act/365 로 고시됩니다.
+        # 둘을 같은 것으로 쓰면 연율 환산이 어긋나 쿠폰이 1.9% 틀어집니다.
+        leg2_index_day_count: Optional[str] = "Act/365",
         effective_date: Optional[datetime.date] = None,
         maturity_date: Optional[datetime.date] = None,
         tenor_str: str = "3Y",
@@ -123,6 +128,7 @@ class KRWSwapPricer:
         l2_adj = leg2_adjust_rule or adjust_rule or "Adjust"
         l2_cal = leg2_pay_cal or pay_cal or "SEB"
         l2_fcal = leg2_fix_cal or fix_cal or "SEB"
+        l2_idx_dc = leg2_index_day_count or l2_dc
         l2_fday = leg2_fix_day if leg2_fix_day is not None else fix_day
 
         if effective_date is None:
@@ -225,7 +231,7 @@ class KRWSwapPricer:
                     "present_value": round(fixed_pv, 6)
                 })
 
-        def _index_window(st, ed, anchor=None):
+        def _reset_window(st, ed, anchor=None):
             """
             지수가 덮는 구간. 금리를 읽는 창이지 이자를 붙이는 기간이 아닙니다.
 
@@ -243,9 +249,9 @@ class KRWSwapPricer:
             더하면 시작일이 밀린 기간마다 창이 같이 밀려, 분기별 거래인데도 창이
             지급기간과 어긋납니다.
             """
-            if not leg2_index_tenor_months:
+            if not leg2_reset_tenor_months:
                 return ed
-            end = apply_conv(add_m(anchor or st, leg2_index_tenor_months),
+            end = apply_conv(add_m(anchor or st, leg2_reset_tenor_months),
                              l2_conv, l2_cal)
             return end if end > ed else ed
 
@@ -265,10 +271,10 @@ class KRWSwapPricer:
                 fix_pct = p.get("fixing_rate_pct")
                 if fix_pct is None and idx == 0:
                     fix_pct = first_fixing_pct
-                idx_end = _index_window(st, ed)
+                reset_end = _reset_window(st, ed)
                 fwd_cd_rate, rate_src = floating_rate_for_period(
-                    self.curve, st, idx_end,
-                    lambda a, b: self.curve.get_forward_rate(a, b, l2_dc),
+                    self.curve, st, reset_end,
+                    lambda a, b: self.curve.get_forward_rate(a, b, l2_idx_dc),
                     None if fix_pct is None else float(fix_pct) / 100.0)
                 df = self.curve.get_df(pay_dt)
                 all_in_float_rate = fwd_cd_rate + (p_spread / 10000.0)
@@ -285,8 +291,8 @@ class KRWSwapPricer:
                     "day_count_fraction": round(frac, 6),
                     "fwd_sofr_pct": round(fwd_cd_rate * 100.0, 6),
                     "spread_bp": round(p_spread, 4),
-                    "index_end_date": idx_end.strftime("%Y-%m-%d"),
-                    "index_tenor_months": leg2_index_tenor_months,
+                    "reset_end_date": reset_end.strftime("%Y-%m-%d"),
+                    "reset_tenor_months": leg2_reset_tenor_months,
                     "rate_source": rate_src,
                     "all_in_rate_pct": round(all_in_float_rate * 100.0, 6),
                     "cash_flow": round(float_cf, 6),
@@ -309,10 +315,10 @@ class KRWSwapPricer:
                 frac = calc_dc_fraction(calc_st, calc_ed, l2_dc)
                 f_date = compute_fixing_date(a_st, l2_fday, l2_fcal)
                 fix_pct = first_fixing_pct if idx == 0 else None
-                idx_end = _index_window(calc_st, calc_ed, u_st)
+                reset_end = _reset_window(calc_st, calc_ed, u_st)
                 fwd_cd_rate, rate_src = floating_rate_for_period(
-                    self.curve, calc_st, idx_end,
-                    lambda a, b: self.curve.get_forward_rate(a, b, l2_dc),
+                    self.curve, calc_st, reset_end,
+                    lambda a, b: self.curve.get_forward_rate(a, b, l2_idx_dc),
                     None if fix_pct is None else float(fix_pct) / 100.0)
                 df = self.curve.get_df(pay_dt)
                 all_in_float_rate = fwd_cd_rate + (spread_bp / 10000.0)
@@ -329,8 +335,8 @@ class KRWSwapPricer:
                     "day_count_fraction": round(frac, 6),
                     "fwd_sofr_pct": round(fwd_cd_rate * 100.0, 6),
                     "spread_bp": round(spread_bp, 4),
-                    "index_end_date": idx_end.strftime("%Y-%m-%d"),
-                    "index_tenor_months": leg2_index_tenor_months,
+                    "reset_end_date": reset_end.strftime("%Y-%m-%d"),
+                    "reset_tenor_months": leg2_reset_tenor_months,
                     "rate_source": rate_src,
                     "all_in_rate_pct": round(all_in_float_rate * 100.0, 6),
                     "cash_flow": round(float_cf, 6),

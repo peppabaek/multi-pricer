@@ -136,10 +136,13 @@ class PricingRequest(BaseModel):
     # 적혀 있거나 trader 가 알고 있으면 여기로 넣습니다. 비워두면 커브에서
     # 같은 길이의 기간을 읽어 추정합니다.
     first_fixing_pct: Optional[float] = None
-    # 변동지수가 덮는 기간. 기본은 지급기간이고, 더 길게 고정되는 거래일 때
-    # 있습니다 - 월별 지급 거래도 매번 3개월 CD 금리로 고정됩니다.
+    # 변동다리가 금리를 다시 잡는 기간. KRW CD 는 3M 이 기본입니다 - 지급이
+    # 월별이어도 금리는 매번 3개월 CD 로 고정됩니다(Murex Reset 3M / Pay 1M).
     # "" 나 "Period" 를 주면 지급기간으로 잡습니다.
-    leg2_index_tenor: Optional[str] = None
+    leg2_reset_tenor: Optional[str] = None
+    # 변동지수가 고시되는 기준. 비워두면 CD 91D 의 Act/365 입니다.
+    # 발생이자 기준(leg2_day_count)과 다를 수 있습니다.
+    leg2_index_day_count: Optional[str] = None
     tenor: str = "5Y"
     
     # Curve Model Selection (USD SOFR only & CRS USD OIS)
@@ -245,16 +248,16 @@ def _validate_pricing_request(req: PricingRequest) -> None:
         raise HTTPException(status_code=400, detail=f"spot_fx must be greater than zero (got {req.spot_fx})")
 
 
-def _resolve_index_months(tenor: Optional[str]) -> Optional[int]:
+def _resolve_reset_months(tenor: Optional[str]) -> Optional[int]:
     """
-    변동지수가 덮는 개월 수. 안 주면 지급기간으로 잡습니다.
+    변동다리가 금리를 다시 잡는 개월 수. 안 주면 CD 91D 의 3M 입니다.
 
     빈 문자열이나 "Period" 는 지수를 지급기간에 맞추라는 뜻으로, 예전
     동작입니다. 읽을 수 없는 값은 기본값으로 돌리지 않고 지급기간으로
     떨어트립니다 - 잘못 읽은 값으로 3M 을 붙이는 것보다 낫습니다.
     """
     if tenor is None:
-        return None
+        return 3
     t = str(tenor).strip().upper()
     if t in ("", "PERIOD", "NONE"):
         return None
@@ -1029,7 +1032,8 @@ def calculate_krw_pricing(req: PricingRequest):
             fixed_coupon_pct=req.fixed_coupon_pct,
             spread_bp=req.spread_bp,
             first_fixing_pct=req.first_fixing_pct,
-            leg2_index_tenor_months=_resolve_index_months(req.leg2_index_tenor),
+            leg2_reset_tenor_months=_resolve_reset_months(req.leg2_reset_tenor),
+            leg2_index_day_count=req.leg2_index_day_count or "Act/365",
             effective_date=eff_date,
             maturity_date=mat_date,
             tenor_str=req.tenor if req.tenor else "3Y",
