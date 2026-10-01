@@ -1,7 +1,8 @@
 """
 LSEG Workspace Real-Time Market Data Feed for KRW CD 91D IRS
-- CD 91D Fixing: KRWCD=KFIA (KOFIA Official Daily Fixing) / KRWCD=
-- O/N Call Rate: KRWCALL=
+- CD 91D Fixing: KRCD3M=KFIA (KOFIA Official Daily Fixing)
+- O/N Call Rate: KRCALL=BOKK (Bank of Korea)
+- 1M, 2M, 4M, 5M: 시장에서 받지 않고 O/N·3M·6M 사이를 보간합니다 (_reinterpolate)
 - Tradition KRW IRS Broker Quotes: KRWIRSxx=TRDL (6M, 9M, 1Y, 18M, 2Y, 3Y, 4Y, 5Y, 7Y, 10Y, 12Y, 15Y, 20Y)
 - Single Dedicated Background Worker Thread for 100% Lock-Free & Crash-Proof Instant Serving (<0.1ms)
 """
@@ -17,16 +18,20 @@ import numpy as np
 
 CONFIG_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "lseg_config.json"))
 
-# Prebon Yamane (PREA) & KRW Deposit Live KRW CD 91D IRS RIC Table
+# KRW CD 91D IRS 호가. 단기는 한국은행 콜금리와 KOFIA CD 3M 두 개만 시장에서
+# 받고, 1M·2M·4M·5M 은 그 사이를 보간합니다(interp 항목이 양쪽 기준점).
+# Murex 의 KRWIRS 커브가 6M 미만에서 똑같이 O/N 과 3M 만 물리고 나머지를
+# 보간하므로, 그쪽과 맞추는 것이 목적입니다. 프라이싱 커브도 6M 미만은
+# O/N 과 3M 만 필러로 쓰므로, 보간된 네 개는 화면과 대사용입니다.
 # - O/N to 5M: KRW Deposit
 # - 6M to 30Y: KRWQMCD with Broker PREA (KRWQMCD{Tenor}=PREA)
 KRW_REAL_RIC_DEFS = [
-    {"tenor": "ON",  "ric": "KRWCALL=",         "bid": 2.8042, "ask": 2.8042, "mid": 2.8042, "is_fix": True},
-    {"tenor": "1M",  "ric": "KRW1MD=",          "bid": 2.8619, "ask": 2.8619, "mid": 2.8619, "is_fix": True},
-    {"tenor": "2M",  "ric": "KRW2MD=",          "bid": 2.9141, "ask": 2.9141, "mid": 2.9141, "is_fix": True},
-    {"tenor": "3M",  "ric": "KRWCD=KFIA",       "bid": 2.9700, "ask": 2.9700, "mid": 2.9700, "is_fix": True},
-    {"tenor": "4M",  "ric": "KRW4MD=",          "bid": 3.0401, "ask": 3.0401, "mid": 3.0401, "is_fix": True},
-    {"tenor": "5M",  "ric": "KRW5MD=",          "bid": 3.1079, "ask": 3.1079, "mid": 3.1079, "is_fix": True},
+    {"tenor": "ON",  "ric": "KRCALL=BOKK",      "bid": 2.8042, "ask": 2.8042, "mid": 2.8042, "is_fix": True},
+    {"tenor": "1M",  "ric": None,               "bid": 2.8619, "ask": 2.8619, "mid": 2.8619, "is_fix": True, "interp": ("ON", "3M")},
+    {"tenor": "2M",  "ric": None,               "bid": 2.9141, "ask": 2.9141, "mid": 2.9141, "is_fix": True, "interp": ("ON", "3M")},
+    {"tenor": "3M",  "ric": "KRCD3M=KFIA",      "bid": 2.9700, "ask": 2.9700, "mid": 2.9700, "is_fix": True},
+    {"tenor": "4M",  "ric": None,               "bid": 3.0401, "ask": 3.0401, "mid": 3.0401, "is_fix": True, "interp": ("3M", "6M")},
+    {"tenor": "5M",  "ric": None,               "bid": 3.1079, "ask": 3.1079, "mid": 3.1079, "is_fix": True, "interp": ("3M", "6M")},
     {"tenor": "6M",  "ric": "KRWQMCD6M=PREA",   "bid": 3.2400, "ask": 3.2750, "mid": 3.2575, "is_fix": False},
     {"tenor": "9M",  "ric": "KRWQMCD9M=PREA",   "bid": 3.3750, "ask": 3.4100, "mid": 3.3925, "is_fix": False},
     {"tenor": "1Y",  "ric": "KRWQMCD1Y=PREA",   "bid": 3.4900, "ask": 3.5250, "mid": 3.5075, "is_fix": False},
@@ -89,6 +94,69 @@ class KRWMarketFeed:
                     "is_overridden": False,
                     "last_tick": datetime.datetime.now().strftime("%H:%M:%S") + " (Base)"
                 }
+            self._reinterpolate()
+
+    def _reinterpolate(self):
+        """
+        시장에서 받지 않는 단기 호가를 양쪽 기준점 사이에 놓는다.
+
+        1M·2M 은 O/N 과 3M 사이, 4M·5M 은 3M 과 6M 사이를 spot 에서 쟴
+        일수로 선형 보간합니다. 개월 수로 나누지 않는 것은 달마다 길이가
+        다르고 만기가 휴일로 밀리기 때문입니다.
+
+        데스크가 Murex 에 맞추어 손으로 넣었던 값과 대조해 보면 0.2bp 안에
+        들어옵니다(1M 3.1515 / 3.1522, 4M 3.2810 / 3.2818).
+
+        수기로 눌러 둔 호가는 건드리지 않습니다 - 보간값이 덮어버리면
+        손으로 넣는 의미가 없습니다.
+        """
+        from .calendar_manager import add_months, apply_convention
+
+        today = datetime.date.today()
+        # KRW 현물은 T+1 입니다. 그냥 하루를 더하면 금요일에 토요일이 나옵니다.
+        spot = apply_convention(today + datetime.timedelta(days=1), "Following", "SEB")
+
+        def horizon(tenor):
+            """
+            spot 에서 그 테너까지의 일수. 영업일로 밀기 전 날짜를 씁니다.
+
+            밀린 날짜를 쓰면 연휴가 끼어드는 테너만 가중치가 튀어오릅니다. 4M
+            만기가 설 연휴를 지나 나흘 밀리는 날에 보간값이 1bp 뛰었고,
+            데스크가 Murex 에 맞추어 넣었던 값과 떨어졌습니다.
+            """
+            if tenor == "ON":
+                return 1
+            months = int(tenor[:-1]) * (12 if tenor.endswith("Y") else 1)
+            return max(1, (add_months(spot, months) - spot).days)
+
+        for item in KRW_REAL_RIC_DEFS:
+            pair = item.get("interp")
+            if not pair:
+                continue
+            t = item["tenor"]
+            q = self._quotes.get(t)
+            if q is None or q.get("is_overridden"):
+                continue
+            lo, hi = (self._quotes.get(pair[0]), self._quotes.get(pair[1]))
+            if not lo or not hi or lo.get("mid") is None or hi.get("mid") is None:
+                continue
+            d_lo, d_hi, d_t = horizon(pair[0]), horizon(pair[1]), horizon(t)
+            if d_hi <= d_lo:
+                continue
+            w = (d_t - d_lo) / float(d_hi - d_lo)
+            def blend(key):
+                a, b = lo.get(key), hi.get(key)
+                if a is None or b is None:
+                    return None
+                return round(a + (b - a) * w, 4)
+            mid = blend("mid")
+            if mid is None:
+                continue
+            q["mid"] = mid
+            q["bid"] = blend("bid") if blend("bid") is not None else mid
+            q["ask"] = blend("ask") if blend("ask") is not None else mid
+            q["chg_bp"] = round((mid - q["prev_close"]) * 100.0, 2)
+            q["last_tick"] = (lo.get("last_tick") or "").split(" ")[0] + " (Interp)"
 
     def _dedicated_fetch_loop(self):
         """Relaxed background worker (60s interval)"""
@@ -105,7 +173,7 @@ class KRWMarketFeed:
     def _do_eikon_fetch(self):
         try:
             from .eikon_rate_limiter import eikon_manager
-            rics = [item["ric"] for item in KRW_REAL_RIC_DEFS]
+            rics = [item["ric"] for item in KRW_REAL_RIC_DEFS if item.get("ric")]
             fields = ["PRIMACT_1", "SEC_ACT_1", "CF_LAST", "CF_CLOSE"]
             df, err = eikon_manager.get_data(rics, fields)
             if df is not None and not df.empty:
@@ -118,6 +186,8 @@ class KRWMarketFeed:
                 with self._lock:
                     for item in KRW_REAL_RIC_DEFS:
                         t = item["tenor"]
+                        if not item.get("ric"):
+                            continue
                         r_code = item["ric"].strip().upper()
                         
                         if t in self._quotes and self._quotes[t]["is_overridden"]:
@@ -140,8 +210,15 @@ class KRWMarketFeed:
                                 mid = round((bid + ask) / 2.0, 4)
                             elif last_val is not None:
                                 mid = float(last_val)
-                                bid = round(mid - 0.01, 4)
-                                ask = round(mid + 0.01, 4)
+                                # 고시치는 한 개의 숫자입니다. 콜금리도 CD 91D 도
+                                # 양방으로 불리지 않으므로 ±1bp 를 지어내면 화면에
+                                # 없는 호가가 생깁니다 - 이제 단기에서 시장을 타는
+                                # 것이 이 둘뿐이라 더 그렇습니다.
+                                if item.get("is_fix"):
+                                    bid = ask = round(mid, 4)
+                                else:
+                                    bid = round(mid - 0.01, 4)
+                                    ask = round(mid + 0.01, 4)
                             else:
                                 continue
 
@@ -156,6 +233,7 @@ class KRWMarketFeed:
                                 "chg_bp": chg_bp,
                                 "last_tick": now_str
                             })
+                    self._reinterpolate()
                     self._is_live_connected = True
                     self._last_update_ts = datetime.datetime.now()
         except Exception:
@@ -219,6 +297,9 @@ class KRWMarketFeed:
                     "is_overridden": source == "Manual",
                     "last_tick": datetime.datetime.now().strftime("%H:%M:%S") + f" ({source})"
                 })
+                # O/N 이나 3M 을 고쳤으면 그 사이에 걸린 호가도 같이 움직여야
+                # 합니다. 안 그러면 화면에 서로 맞지 않는 단기 커브가 남습니다.
+                self._reinterpolate()
                 self._last_update_ts = datetime.datetime.now()
                 return True
         return False

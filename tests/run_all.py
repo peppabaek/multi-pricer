@@ -39,6 +39,7 @@ SUITES = [
     ("L31 Stub amortiser", "test_l31_stub_amortiser.py"),
     ("L32 Started floating period", "test_l32_started_period.py"),
     ("L33 Reset tenor + index basis", "test_l33_reset_tenor.py"),
+    ("L34 KRW short-end RICs", "test_l34_krw_rics.py"),
 ]
 
 total_fail = 0
