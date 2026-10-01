@@ -37,6 +37,7 @@ SUITES = [
     ("L29 Review fidelity", "test_l29_review_fidelity.py"),
     ("L30 Solve rate from MtM", "test_l30_solve_rate.py"),
     ("L31 Stub amortiser", "test_l31_stub_amortiser.py"),
+    ("L32 Started floating period", "test_l32_started_period.py"),
 ]
 
 total_fail = 0

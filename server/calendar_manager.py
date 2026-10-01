@@ -308,6 +308,37 @@ def compute_fixing_date(start_date: datetime.date, fix_day: int = -1, fix_cal: O
         return start_date
     return add_business_days(start_date, fix_day, fix_cal)
 
+def floating_rate_for_period(curve, start_date, end_date, rate_fn, fixing=None):
+    """
+    변동다리 한 기간의 금리와 그 출처를 돌려줍니다.
+
+    기간이 이미 시작됐으면 그 금리는 과거 고정일에 정해진 값입니다.
+    커브에는 없으니 거래조건서나 trader 가 준 fixing 을 먼저 쓰고, 없으면
+    같은 길이의 기간을 spot 에서 끊어 커브에서 읽습니다.
+
+    과거 시작일을 선도금리 공식에 그대로 넣으면 안 됩니다. DF 는 과거
+    날짜에서 1.0 으로 잘리는데 일수는 기간 전체를 세기 때문에, 금리가
+    (남은 일수 / 전체 일수) 배로 줄어들어 버립니다. 30일 중 13일이 지난
+    기간의 2.832% 가 1.605% 로 나왔고, 그만큼 첫 쿠폰이 줄어 Murex 와
+    20bp 넘게 벌어졌습니다.
+
+    rate_fn(start, end) 이 그 구간의 금리를 돌려줍니다. 단위는 rate_fn 을
+    따르니 fixing 도 같은 단위로 주십시오.
+
+    source: "Fixing" 주어진 고정치 / "Estimated" 시작된 기간의 추정치 /
+    "Forward" 약정된 선도금리.
+    """
+    if fixing is not None:
+        return float(fixing), "Fixing"
+
+    pricing_date = getattr(curve, "pricing_date", None)
+    if pricing_date is None or start_date >= pricing_date:
+        return rate_fn(start_date, end_date), "Forward"
+
+    spot = getattr(curve, "settle_date", None) or pricing_date
+    return rate_fn(spot, spot + (end_date - start_date)), "Estimated"
+
+
 def generate_schedule(
     effective_date: datetime.date,
     maturity_date: datetime.date,

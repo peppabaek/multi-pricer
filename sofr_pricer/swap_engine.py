@@ -61,6 +61,7 @@ class USDSOFRSwapPricer:
         position: str = "Pay Fixed", # "Pay Fixed" or "Rec Fixed"
         fixed_coupon_pct: float = 3.725, # e.g. 3.725 %
         spread_bp: float = 0.0, # e.g. 0.0 bp
+        first_fixing_pct: Optional[float] = None,
         effective_date: Optional[datetime.date] = None,
         maturity_date: Optional[datetime.date] = None,
         tenor_str: str = "5Y",
@@ -104,7 +105,8 @@ class USDSOFRSwapPricer:
             day_count_fraction as calc_dc_fraction,
             apply_convention as apply_conv,
             add_months as add_m,
-            resolve_custom_pay_date
+            resolve_custom_pay_date,
+            floating_rate_for_period
         )
         
         # Resolve Leg 1 and Leg 2 parameters
@@ -237,7 +239,13 @@ class USDSOFRSwapPricer:
                     f_date = parse_date(f_date_str)
                 else:
                     f_date = compute_fixing_date(st, l2_fday, l2_fcal)
-                fwd_sofr = self.curve.get_forward_rate(st, ed, l2_dc)
+                fix_pct = p.get("fixing_rate_pct")
+                if fix_pct is None and idx == 0:
+                    fix_pct = first_fixing_pct
+                fwd_sofr, rate_src = floating_rate_for_period(
+                    self.curve, st, ed,
+                    lambda a, b: self.curve.get_forward_rate(a, b, l2_dc),
+                    None if fix_pct is None else float(fix_pct) / 100.0)
                 df = self.curve.get_df(pay_dt) / df_settle
                 all_in_rate = fwd_sofr + (p_spread / 10000.0)
                 float_cf = p_notional * all_in_rate * frac
@@ -253,6 +261,7 @@ class USDSOFRSwapPricer:
                     "day_count_fraction": round(frac, 6),
                     "fwd_sofr_pct": round(fwd_sofr * 100.0, 6),
                     "spread_bp": round(p_spread, 4),
+                    "rate_source": rate_src,
                     "all_in_rate_pct": round(all_in_rate * 100.0, 6),
                     "cash_flow": round(float_cf, 6),
                     "discount_factor": round(df, 6),
@@ -273,7 +282,11 @@ class USDSOFRSwapPricer:
             for idx, (a_st, a_ed, pay_dt, calc_st, calc_ed, u_st, u_ed) in enumerate(raw_periods_l2):
                 frac = calc_dc_fraction(calc_st, calc_ed, l2_dc)
                 f_date = compute_fixing_date(a_st, l2_fday, l2_fcal)
-                fwd_sofr = self.curve.get_forward_rate(calc_st, calc_ed, l2_dc)
+                fix_pct = first_fixing_pct if idx == 0 else None
+                fwd_sofr, rate_src = floating_rate_for_period(
+                    self.curve, calc_st, calc_ed,
+                    lambda a, b: self.curve.get_forward_rate(a, b, l2_dc),
+                    None if fix_pct is None else float(fix_pct) / 100.0)
                 df = self.curve.get_df(pay_dt) / df_settle
                 all_in_rate = fwd_sofr + (spread_bp / 10000.0)
                 float_cf = notional * all_in_rate * frac
@@ -289,6 +302,7 @@ class USDSOFRSwapPricer:
                     "day_count_fraction": round(frac, 6),
                     "fwd_sofr_pct": round(fwd_sofr * 100.0, 6),
                     "spread_bp": round(spread_bp, 4),
+                    "rate_source": rate_src,
                     "all_in_rate_pct": round(all_in_rate * 100.0, 6),
                     "cash_flow": round(float_cf, 6),
                     "discount_factor": round(df, 6),

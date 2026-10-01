@@ -132,6 +132,10 @@ class PricingRequest(BaseModel):
     position: str = "Pay Fixed" # "Pay Fixed" or "Rec Fixed"
     fixed_coupon_pct: Optional[float] = None
     spread_bp: float = 0.0
+    # 첫 변동기간이 이미 시작됐으면 그 금리는 고정돼 있습니다. 거래조건서에
+    # 적혀 있거나 trader 가 알고 있으면 여기로 넣습니다. 비워두면 커브에서
+    # 같은 길이의 기간을 읽어 추정합니다.
+    first_fixing_pct: Optional[float] = None
     tenor: str = "5Y"
     
     # Curve Model Selection (USD SOFR only & CRS USD OIS)
@@ -514,6 +518,7 @@ def calculate_pricing(req: PricingRequest):
             position=req.position,
             fixed_coupon_pct=req.fixed_coupon_pct,
             spread_bp=req.spread_bp,
+            first_fixing_pct=req.first_fixing_pct,
             effective_date=eff_date,
             maturity_date=mat_date,
             tenor_str=req.tenor,
@@ -993,6 +998,7 @@ def calculate_krw_pricing(req: PricingRequest):
             position=req.position,
             fixed_coupon_pct=req.fixed_coupon_pct,
             spread_bp=req.spread_bp,
+            first_fixing_pct=req.first_fixing_pct,
             effective_date=eff_date,
             maturity_date=mat_date,
             tenor_str=req.tenor if req.tenor else "3Y",
@@ -1169,6 +1175,7 @@ def price_swap_kofr(req: PricingRequest):
             position=req.position,
             fixed_coupon_pct=req.fixed_coupon_pct,
             spread_bp=req.spread_bp,
+            first_fixing_pct=req.first_fixing_pct,
             effective_date=eff_date,
             maturity_date=mat_date,
             tenor_str=req.tenor if req.tenor else "1Y",

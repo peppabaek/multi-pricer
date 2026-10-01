@@ -45,6 +45,7 @@ class KOFRSwapPricer:
         position: str = "Pay Fixed",        # "Pay Fixed" or "Receive Fixed"
         fixed_coupon_pct: Optional[float] = None, # in % p.a.
         spread_bp: float = 0.0,             # Float spread in bp
+        first_fixing_pct: Optional[float] = None,
         effective_date: Optional[datetime.date] = None,
         maturity_date: Optional[datetime.date] = None,
         tenor_str: str = "1Y",
@@ -90,7 +91,8 @@ class KOFRSwapPricer:
             day_count_fraction as calc_dc_fraction,
             apply_convention as apply_conv,
             add_months as add_m,
-            resolve_custom_pay_date
+            resolve_custom_pay_date,
+            floating_rate_for_period
         )
         
         # Resolve Leg 1 and Leg 2 parameters
@@ -222,8 +224,14 @@ class KOFRSwapPricer:
                 if is_fixed_fixed:
                     fwd_kofr_rate = c2_val
                     float_rate_total = c2_val
+                    rate_src = "Fixed"
                 else:
-                    fwd_kofr_rate = self.curve.get_forward_compounded_rate(s_d, e_d)
+                    fix_pct = p.get("fixing_rate_pct")
+                    if fix_pct is None and idx == 0:
+                        fix_pct = first_fixing_pct
+                    fwd_kofr_rate, rate_src = floating_rate_for_period(
+                        self.curve, s_d, e_d,
+                        self.curve.get_forward_compounded_rate, fix_pct)
                     float_rate_total = fwd_kofr_rate + (p_spread / 100.0)
                 float_cf = p_notional * (float_rate_total / 100.0) * frac
                 float_pv = float_cf * df_pay
@@ -239,6 +247,7 @@ class KOFRSwapPricer:
                     "fwd_sofr_pct": round(fwd_kofr_rate, 4),
                     "fwd_kofr_pct": round(fwd_kofr_rate, 4),
                     "spread_bp": p_spread,
+                    "rate_source": rate_src,
                     "all_in_rate_pct": round(float_rate_total, 4),
                     "cash_flow": round(float_cf, 2),
                     "discount_factor": round(df_pay, 6),
@@ -264,8 +273,12 @@ class KOFRSwapPricer:
                 if is_fixed_fixed:
                     fwd_kofr_rate = c2_val
                     float_rate_total = c2_val
+                    rate_src = "Fixed"
                 else:
-                    fwd_kofr_rate = self.curve.get_forward_compounded_rate(calc_st, calc_ed)
+                    fwd_kofr_rate, rate_src = floating_rate_for_period(
+                        self.curve, calc_st, calc_ed,
+                        self.curve.get_forward_compounded_rate,
+                        first_fixing_pct if idx == 0 else None)
                     float_rate_total = fwd_kofr_rate + (spread_bp / 100.0)
                 float_cf = notional * (float_rate_total / 100.0) * frac
                 float_pv = float_cf * df_pay
@@ -281,6 +294,7 @@ class KOFRSwapPricer:
                     "fwd_sofr_pct": round(fwd_kofr_rate, 4),
                     "fwd_kofr_pct": round(fwd_kofr_rate, 4),
                     "spread_bp": spread_bp,
+                    "rate_source": rate_src,
                     "all_in_rate_pct": round(float_rate_total, 4),
                     "cash_flow": round(float_cf, 2),
                     "discount_factor": round(df_pay, 6),
@@ -318,6 +332,7 @@ class KOFRSwapPricer:
                 "day_count_fraction": frac_val,
                 "fixed_rate_pct": r1,
                 "fwd_kofr_pct": r2,
+                "rate_source": l2.get("rate_source", "Forward"),
                 "fixed_cf": round(cf1, 2),
                 "float_cf": round(cf2, 2),
                 "net_cf": round(net_cf, 2),
@@ -423,6 +438,7 @@ class KOFRSwapPricer:
                 "day_count_fraction": r["day_count_fraction"],
                 "fwd_sofr_pct": r["fwd_kofr_pct"],
                 "fwd_kofr_pct": r["fwd_kofr_pct"],
+                "rate_source": r.get("rate_source", "Forward"),
                 "spread_bp": 0.0,
                 "all_in_rate_pct": r["fwd_kofr_pct"],
                 "cash_flow": r["float_cf"],
