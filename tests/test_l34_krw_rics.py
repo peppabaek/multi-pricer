@@ -73,6 +73,17 @@ def t_2():
     if any(r is None for r in asked):
         raise AssertionError("조회 목록에 None 이 섞임")
 
+    # 화면에서는 빈 칸이 아니라 보간이라고 밝혀야 합니다. 비어 있으면 조회가
+    # 실패한 것과 구분이 안 됩니다.
+    q = quotes(KRWMarketFeed())
+    for t in INTERPOLATED:
+        shown = q[t].get("ric")
+        if not shown or "보간" not in str(shown):
+            raise AssertionError(f"{t} RIC 칸이 {shown!r} - 보간이라고 표시되지 않음")
+    for t in ("ON", "3M"):
+        if "보간" in str(q[t].get("ric")):
+            raise AssertionError(f"{t} 가 보간으로 표시됨: {q[t].get('ric')!r}")
+
 
 @case("L34-3", "보간값이 데스크 수기입력과 0.5bp 안에 든다")
 def t_3():

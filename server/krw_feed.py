@@ -83,9 +83,12 @@ class KRWMarketFeed:
         with self._lock:
             for item in KRW_REAL_RIC_DEFS:
                 t = item["tenor"]
+                # 보간 테너는 RIC 이 없습니다. 빈 칸으로 두면 화면에서 조회가
+                # 안 된 것처럼 보이므로, 어디서 나온 값인지 적어 둡니다.
+                pair = item.get("interp")
                 self._quotes[t] = {
                     "tenor": t,
-                    "ric": item["ric"],
+                    "ric": item["ric"] or ("보간 " + "·".join(pair) if pair else None),
                     "bid": float(item["bid"]),
                     "ask": float(item["ask"]),
                     "mid": float(item["mid"]),
