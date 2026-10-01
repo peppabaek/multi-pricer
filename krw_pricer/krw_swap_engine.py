@@ -58,6 +58,9 @@ class KRWSwapPricer:
         fixed_coupon_pct: float = 3.8475,
         spread_bp: float = 0.0,
         first_fixing_pct: Optional[float] = None,
+        # CD 91D 는 3개월짜리 금리입니다. 지급주기가 월별이든 분기별이든, 한
+        # 번 고정되는 것은 언제나 3개월 금리입니다. None 이면 지급기간으로 잡습니다.
+        leg2_index_tenor_months: Optional[int] = 3,
         effective_date: Optional[datetime.date] = None,
         maturity_date: Optional[datetime.date] = None,
         tenor_str: str = "3Y",
@@ -222,6 +225,30 @@ class KRWSwapPricer:
                     "present_value": round(fixed_pv, 6)
                 })
 
+        def _index_window(st, ed, anchor=None):
+            """
+            지수가 덮는 구간. 금리를 읽는 창이지 이자를 붙이는 기간이 아닙니다.
+
+            KRW CD 91D 스왓의 변동다리는 지급이 월별이어도 매번 3개월 CD
+            금리로 한 번 고정됩니다. 지급기간으로 선도금리를 읽으면 우상향
+            커브에서 매번 짧은 금리를 잍게 되고, 월별 지급 거래에서 Murex 보다
+            평균 9.7bp 낮게 나왔습니다.
+
+            지급기간이 지수보다 길 때는 그 기간 안에서 고정이 여러 번
+            일어나 복리로 쌓입니다. 그 결과는 지급기간 선도금리와 사실상 같으므로
+            기간을 그대로 둡니다. 여기서 3개월을 강제하면 반기 지급 거래가
+            8.5bp 낙습니다.
+
+            anchor 는 영업일 조정 전의 롤날짜입니다. 조정된 시작일에서 3개월을
+            더하면 시작일이 밀린 기간마다 창이 같이 밀려, 분기별 거래인데도 창이
+            지급기간과 어긋납니다.
+            """
+            if not leg2_index_tenor_months:
+                return ed
+            end = apply_conv(add_m(anchor or st, leg2_index_tenor_months),
+                             l2_conv, l2_cal)
+            return end if end > ed else ed
+
         if l2_custom:
             for idx, p in enumerate(l2_custom):
                 st = parse_date(p.get("start_date", effective_date))
@@ -238,8 +265,9 @@ class KRWSwapPricer:
                 fix_pct = p.get("fixing_rate_pct")
                 if fix_pct is None and idx == 0:
                     fix_pct = first_fixing_pct
+                idx_end = _index_window(st, ed)
                 fwd_cd_rate, rate_src = floating_rate_for_period(
-                    self.curve, st, ed,
+                    self.curve, st, idx_end,
                     lambda a, b: self.curve.get_forward_rate(a, b, l2_dc),
                     None if fix_pct is None else float(fix_pct) / 100.0)
                 df = self.curve.get_df(pay_dt)
@@ -257,6 +285,8 @@ class KRWSwapPricer:
                     "day_count_fraction": round(frac, 6),
                     "fwd_sofr_pct": round(fwd_cd_rate * 100.0, 6),
                     "spread_bp": round(p_spread, 4),
+                    "index_end_date": idx_end.strftime("%Y-%m-%d"),
+                    "index_tenor_months": leg2_index_tenor_months,
                     "rate_source": rate_src,
                     "all_in_rate_pct": round(all_in_float_rate * 100.0, 6),
                     "cash_flow": round(float_cf, 6),
@@ -279,8 +309,9 @@ class KRWSwapPricer:
                 frac = calc_dc_fraction(calc_st, calc_ed, l2_dc)
                 f_date = compute_fixing_date(a_st, l2_fday, l2_fcal)
                 fix_pct = first_fixing_pct if idx == 0 else None
+                idx_end = _index_window(calc_st, calc_ed, u_st)
                 fwd_cd_rate, rate_src = floating_rate_for_period(
-                    self.curve, calc_st, calc_ed,
+                    self.curve, calc_st, idx_end,
                     lambda a, b: self.curve.get_forward_rate(a, b, l2_dc),
                     None if fix_pct is None else float(fix_pct) / 100.0)
                 df = self.curve.get_df(pay_dt)
@@ -298,6 +329,8 @@ class KRWSwapPricer:
                     "day_count_fraction": round(frac, 6),
                     "fwd_sofr_pct": round(fwd_cd_rate * 100.0, 6),
                     "spread_bp": round(spread_bp, 4),
+                    "index_end_date": idx_end.strftime("%Y-%m-%d"),
+                    "index_tenor_months": leg2_index_tenor_months,
                     "rate_source": rate_src,
                     "all_in_rate_pct": round(all_in_float_rate * 100.0, 6),
                     "cash_flow": round(float_cf, 6),
