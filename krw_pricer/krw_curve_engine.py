@@ -234,41 +234,38 @@ def bootstrap_krw_curve(
     curve.zero_rates.append(zero_on)
     curve.dfs.append(df_settle)
 
-    # 2. 6M 미만 단기 필러 (1M, 2M, 3M CD, 4M, 5M)
+    # 2. 3M CD 91D Pillar (Money Market)
     #
-    # 예전에는 ON 과 3M CD 둘만 세우고 그 사이를 직선으로 이었습니다. 데스크가
-    # O/N 부터 5M 까지 손으로 넣는 호가는 그래서 어디에도 쓰이지 않았습니다 -
-    # 1M 부터 5M 까지 전부에 200bp 를 더해도 가격이 1원도 움직이지 않았습니다.
-    # 월별 지급처럼 3개월 안쪽에 기간이 여러 개 들어가는 거래는 전부 그 직선
-    # 위에서 계산됐습니다.
+    # 6M 미만에서 시장데이터를 물리는 것은 O/N 과 3M CD 둘뿐입니다. 1M·2M·4M·5M 은
+    # 호가가 들어와도 필러로 세우지 않고 보간으로 둡니다. Murex 의 KRWIRS 커브가
+    # 그렇게 구성돼 있어, 그쪽에 맞추는 것이 목적입니다.
     #
-    # 6M 부터의 분기 그리드는 여전히 3M 에서 출발합니다. 4M·5M 은 보간 매듭점으로만
-    # 들어가고 스왓 부트스트래핑의 쿠폰 누적에는 끼지 않아, 6M 이상 필러는
-    # 하나도 바뀜지 않습니다.
+    # 한 번 네 개를 필러로 세워 봤습니다. 실제 호가로는 월별 지급 거래의 선도금리가
+    # 0.1bp 도 움직이지 않았고 - 지금 시장의 단기 커브가 거의 직선입니다 - Murex
+    # 와의 차이도 그대로였습니다. 다시 세우려거든 Murex 커브도 같이 바꿀 때입니다.
     cd_rate = quote_map.get("3M", 2.9700)
-    mat_3m = dt_3m = df_3m = None
-    for m in (1, 2, 3, 4, 5):
-        if m != 3 and f"{m}M" not in quote_map:
-            continue
-        rate_m = quote_map.get(f"{m}M", cd_rate)
-        mat_m = apply_krw_convention(add_months(settle_date, m),
-                                     "Modified Following", holidays)
-        # 영업일로 밀리다 앞 필러와 같은 날이 되면 둘 중 하나는 버려야
-        # 합니다. 같은 날짜가 두 번 들어가면 보간이 0으로 나눔니다.
-        if curve.mat_dates and mat_m <= curve.mat_dates[-1]:
-            continue
-        dt_m = (mat_m - settle_date).days
-        days_pricing = (mat_m - pricing_date).days
-        df_m = df_settle / (1.0 + (rate_m / 100.0) * (dt_m / 365.0))
-        zero_m = (-365.0 / days_pricing * math.log(df_m) * 100.0
-                  if days_pricing > 0 and df_m > 0 else rate_m)
-        curve.pillars.append({"tenor": f"{m}M", "mat_date": mat_m, "rate": rate_m,
-                              "df": df_m, "zero_rate": zero_m, "months": m})
-        curve.mat_dates.append(mat_m)
-        curve.zero_rates.append(zero_m)
-        curve.dfs.append(df_m)
-        if m == 3:
-            mat_3m, dt_3m, df_3m = mat_m, dt_m, df_m
+    mat_3m = apply_krw_convention(add_months(settle_date, 3), "Modified Following", holidays)
+    dt_3m = (mat_3m - settle_date).days
+    days_3m_pricing = (mat_3m - pricing_date).days
+
+    # Step 3: Spot-relative DF = 1 / (1 + CD * dt/365)
+    # Step 4: Today-based DF = DF_ON * DF_spot
+    df_3m = df_settle / (1.0 + (cd_rate / 100.0) * (dt_3m / 365.0))
+    # Step 5: 대표 tenor zero rate 산출 (Continuous Zero Rate from Today)
+    zero_3m = -365.0 / days_3m_pricing * math.log(df_3m) * 100.0 if days_3m_pricing > 0 else cd_rate
+
+    item_3m = {
+        "tenor": "3M",
+        "mat_date": mat_3m,
+        "rate": cd_rate,
+        "df": df_3m,
+        "zero_rate": zero_3m,
+        "months": 3
+    }
+    curve.pillars.append(item_3m)
+    curve.mat_dates.append(mat_3m)
+    curve.zero_rates.append(zero_3m)
+    curve.dfs.append(df_3m)
 
     # 3. Sequential 3M Quarterly Grid Bootstrapping (6M to 360M / 30Y)
 

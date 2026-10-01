@@ -5,11 +5,12 @@ L33 일정표와 마켓 데이터만으로 계산하는 변동다리.
 Murex 와 flow 를 대사했더니 leg2 금리가 매 기간 6~16bp 낮았습니다. 원인을
 찾다가 커브에서 두 가지가 나왔습니다.
 
-하나는 진짜 고장입니다. 6M 미만 필러가 ON 과 3M CD 둘뿐이고 그 사이가
-직선이었습니다. 데스크가 손으로 넣는 O/N~5M 호가 중 1M·2M·4M·5M 은 커브에
-들어가지 않아, 전부에 200bp 를 더해도 가격이 1원도 움직이지 않았습니다.
+먼저 커브 구성은 원인이 아닙니다. Murex 도 6M 미만에서 O/N 과 3M CD 만
+시장데이터로 물리고 나머지는 보간하며, forecast 와 discount 가 같은
+KRWIRS 커브입니다. 1M·2M·4M·5M 을 필러로 세워 봐도 이 거래의 선도금리는
+0.1bp 도 움직이지 않았습니다.
 
-다른 하나는 고장이 아닙니다. 일정표의 첫 세 달(2026-10-02 ~ 2027-01-04)은
+원인은 투영 구간입니다. 일정표의 첫 세 달(2026-10-02 ~ 2027-01-04)은
 3M CD 구간을 정확히 덮습니다. 그러니 그 세 기간의 선도금리를 복리로 쌓으면
 3M CD 호가가 그대로 나와야 하고, 실제로 나옵니다:
 
@@ -78,32 +79,45 @@ def t_1():
         raise AssertionError(f"3M CD 3.2200% 여야 하는데 {implied:.6f}% - 커브에 차익거래")
 
 
-@case("L33-2", "1M·2M·4M·5M 호가가 커브에 실제로 들어간다")
+@case("L33-2", "6M 미만 필러는 O/N 과 3M 뿐이다")
 def t_2():
     """
-    데스크가 손으로 넣은 값이 아무 데도 쓰이지 않았습니다. 필러가 ON 과 3M
-    둘뿐이라, 1M 에 얼마를 넣든 그 사이는 직선이었습니다.
+    Murex 의 KRWIRS 커브가 6M 미만에서 O/N 과 3M CD 만 시장데이터로 물리고
+    1M·2M·4M·5M 은 보간합니다. 맞추는 것이 목적이므로 여기도 같습니다.
+
+    한 번 네 개를 전부 필러로 세워 봤습니다. 실제 호가로는 월별 지급 거래의
+    선도금리가 0.1bp 도 움직이지 않았고 - 지금 시장의 단기 커브가 거의
+    직선입니다 - Murex 와의 차이도 그대로였습니다. 데스크가 1M~5M 에 넣는
+    값이 KRW 가격을 바꾸지 않는 것은 고장이 아니라 이 구성의 결과입니다.
     """
-    c = desk_curve()
-    short = [p["tenor"] for p in c.pillars if p["months"] <= 5]
-    for t in ("1M", "2M", "3M", "4M", "5M"):
-        if t not in short:
-            raise AssertionError(f"{t} 가 커브 필러에 없음: {short}")
-
-    bumped = [(t, m + 2.0 if t in ("1M", "2M", "4M", "5M") else m) for t, m in QUOTES]
-    a = desk_curve().get_forward_rate(D(2026, 11, 2), D(2026, 12, 2), "Act/365")
-    b = desk_curve(bumped).get_forward_rate(D(2026, 11, 2), D(2026, 12, 2), "Act/365")
-    if abs(b - a) < 1e-4:
-        raise AssertionError(
-            f"1M·2M·4M·5M 에 200bp 를 더했는데 선도금리가 {(b - a) * 10000:.2f}bp 움직임")
+    short = [p["tenor"] for p in desk_curve().pillars if p["months"] <= 5]
+    if short != ["ON", "3M"]:
+        raise AssertionError(f"6M 미만 필러가 O/N·3M 이 아님: {short}")
 
 
-@case("L33-3", "단기 필러를 더해도 호가 재현은 그대로다")
+@case("L33-3", "호가 모양이 달라져도 3개월 복리 관계는 성립한다")
 def t_3():
     """
-    4M·5M 은 보간 매듭점으로만 들어갑니다. 분기 부트스트랩의 쿠폰 누적에
-    끼면 이미 체결된 장기 거래의 평가가 전부 움직입니다.
+    L33-1 이 한 날짜의 우연이 아님을 보입니다. 중간 보간을 어떻게 하든 양 끝
+    DF 가 3M 호가로 고정돼 있으면 세 기간의 복리는 그 호가일 수밖에 없습니다.
     """
+    for cd in (1.50, 3.22, 5.75):
+        quotes = [(t, (cd if t == "3M" else m)) for t, m in QUOTES]
+        c = desk_curve(quotes)
+        mat3m = apply_krw_convention(add_months(ST, 3), "Modified Following", None)
+        periods = [(D(2026, 10, 2), D(2026, 11, 2)), (D(2026, 11, 2), D(2026, 12, 2)),
+                   (D(2026, 12, 2), mat3m)]
+        g = 1.0
+        for a, b in periods:
+            g *= 1.0 + c.get_forward_rate(a, b, "Act/365") * ((b - a).days / 365.0)
+        implied = (g - 1.0) * 365.0 / (mat3m - ST).days * 100.0
+        if abs(implied - cd) > 1e-6:
+            raise AssertionError(f"3M CD {cd}% 인데 복리가 {implied:.6f}%")
+
+
+@case("L33-8", "분기 거래의 par 는 호가를 되돌려준다")
+def t_8():
+    """부트스트랩이 흔들리면 여기서 먼저 틀어집니다."""
     pr = KRWSwapPricer(desk_curve())
     quoted = dict(QUOTES)
     for tenor in ("1Y", "5Y", "10Y"):
