@@ -7,7 +7,7 @@
 이후만 말합니다. 그래서 지금까지는 같은 길이의 구간을 spot 에서 끊어
 추정했고(rate_source "Estimated"), Murex 와는 당연히 어긋났습니다.
 
-실제 고시치는 LSEG 시계열에 있습니다. KRW CD 91D 는 KRCD3M=KFIA, 콜금리는
+실제 고시치는 LSEG 시계열에 있습니다. KRW CD 91D 는 KRCD3M=KFIA, KOFR 은 KOFR=KSDQ, 콜금리는
 KRCALL=BOKK. 한 번 고시된 값은 바뀌지 않으므로 받아서 영구히 캐시합니다.
 
 호스팅 쪽에는 Workspace 가 없습니다. 호가와 같은 길 - 데스크 PC 가 중계로
@@ -27,6 +27,8 @@ INDEX_RICS = {
     "KRW": "KRCD3M=KFIA",
     "KRW_CALL": "KRCALL=BOKK",
     "ON": "KRCALL=BOKK",
+    "KOFR": "KOFR=KSDQ",
+    "KRW_KOFR": "KOFR=KSDQ",
 }
 
 # 고시일이 휴일이거나 그날 값이 비면 직전 영업일 값을 씁니다. 시장 관행이고,

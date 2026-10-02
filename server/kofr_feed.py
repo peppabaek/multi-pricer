@@ -2,7 +2,7 @@
 KOFR OIS Live Market Feed Handler
 - Connects to LSEG Workspace (Refinitiv Eikon Desktop API)
 - Primary RIC source: Tradition Seoul ('TRDS') and KMBC KOFR OIS ('KRWKFxxOIS=TRDS' / 'KMBC')
-- O/N: KRCALL=BOKK (한국은행 콜금리). KRWKOFR= 는 Workspace 에 없는 레코드입니다.
+- O/N: KOFR=KSDQ (KOFR 고시). KRWKOFR= 는 Workspace 에 없는 레코드입니다.
 - Manages real-time caching, thread-safe access, and manual overrides
 """
 
@@ -19,10 +19,11 @@ CONFIG_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "lse
 
 # Standard Tradition Seoul (TRDS) & KMBC KOFR OIS RIC Table
 KOFR_REAL_RIC_DEFS = [
-    # KRWKOFR= 는 Workspace 에 없는 레코드입니다("The record could not be found").
-    # 그래서 O/N 은 조회해도 값이 안 들어와 기준호가에 멈춰 있었습니다.
-    # KRW CD 쪽과 같은 한국은행 콜금리를 씁니다.
-    {"tenor": "ON",  "ric": "KRCALL=BOKK",     "bid": 2.8042, "ask": 2.8042, "mid": 2.8042, "is_fix": True},
+    # KOFR 고시 자체입니다. 예전에 쓰던 KRWKOFR= 는 Workspace 에 없는
+    # 레코드라("The record could not be found") O/N 이 기준호가에 멈춰 있었습니다.
+    # 콜금리(KRCALL=BOKK)로 잠시 대신했는데, KOFR 은 RP 기반이라 콜금리와
+    # 몇 bp 다릅니다 - 오늘도 3.091 대 3.05 였습니다. 제 값을 씁니다.
+    {"tenor": "ON",  "ric": "KOFR=KSDQ",       "bid": 2.8042, "ask": 2.8042, "mid": 2.8042, "is_fix": True},
     {"tenor": "3M",  "ric": "KRWKF3MOIS=KMBC", "bid": 2.9750, "ask": 3.0250, "mid": 3.0000, "is_fix": True},
     {"tenor": "6M",  "ric": "KRWKF6MOIS=KMBC", "bid": 3.1400, "ask": 3.1900, "mid": 3.1650, "is_fix": False},
     {"tenor": "9M",  "ric": "KRWKF9MOIS=KMBC", "bid": 3.2775, "ask": 3.3275, "mid": 3.3025, "is_fix": False},

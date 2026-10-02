@@ -225,17 +225,16 @@ def t_9():
 
 # ------------------------------------------------------------------ KOFR OIS
 
-@case("L34-10", "KOFR OIS 의 O/N 도 한국은행 콜금리를 쓴다")
+@case("L34-10", "KOFR OIS 의 O/N 은 KOFR=KSDQ 고시를 쓴다")
 def t_10():
     """
-    KRWKOFR= 는 Workspace 에 없는 레코드입니다 - 조회하면
-    "The record could not be found" 가 돌아오고, 그래서 KOFR 의 O/N 은
-    조회해도 값이 안 들어와 기준호가에 머물러 있었습니다.
+    KRWKOFR= 는 Workspace 에 없는 레코드이고, 콜금리(KRCALL=BOKK)는 RP 기반인
+    KOFR 과 금리 차이가 있으므로 실제 고시 RIC 인 KOFR=KSDQ 를 사용합니다.
     """
     from server.kofr_feed import KOFR_REAL_RIC_DEFS
 
     by_tenor = {d["tenor"]: d.get("ric") for d in KOFR_REAL_RIC_DEFS}
-    if by_tenor.get("ON") != "KRCALL=BOKK":
+    if by_tenor.get("ON") != "KOFR=KSDQ":
         raise AssertionError(f"KOFR O/N RIC 이 {by_tenor.get('ON')!r}")
     if any(r == "KRWKOFR=" for r in by_tenor.values()):
         raise AssertionError("없는 레코드 KRWKOFR= 가 아직 남아 있음")
@@ -248,7 +247,7 @@ def t_11():
     from server.kofr_feed import KOFRMarketFeed
 
     rows = pd.DataFrame([
-        {"Instrument": "KRCALL=BOKK", "PRIMACT_1": None, "SEC_ACT_1": None,
+        {"Instrument": "KOFR=KSDQ", "PRIMACT_1": None, "SEC_ACT_1": None,
          "CF_LAST": 3.05, "CF_CLOSE": 3.048},
         {"Instrument": "KRWKF1YOIS=KMBC", "PRIMACT_1": 3.4775, "SEC_ACT_1": 3.5275,
          "CF_LAST": None, "CF_CLOSE": 3.50},
@@ -264,11 +263,12 @@ def t_11():
 
     on = q["ON"]
     if abs(on["mid"] - 3.05) > 1e-9:
-        raise AssertionError(f"콜금리 3.05 가 {on['mid']} 로 들어옴")
+        raise AssertionError(f"KOFR 고시치 3.05 가 {on['mid']} 로 들어옴")
     if on["bid"] != on["mid"] or on["ask"] != on["mid"]:
         raise AssertionError(f"고시치에 스프레드를 붙임: {on['bid']}/{on['ask']}")
     if q["1Y"]["bid"] >= q["1Y"]["ask"]:
         raise AssertionError(f"1Y 양방이 사라짐: {q['1Y']['bid']}/{q['1Y']['ask']}")
+
 
 
 if __name__ == "__main__":

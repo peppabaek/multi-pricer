@@ -46,6 +46,8 @@ class KOFRSwapPricer:
         fixed_coupon_pct: Optional[float] = None, # in % p.a.
         spread_bp: float = 0.0,             # Float spread in bp
         first_fixing_pct: Optional[float] = None,
+        # 지나간 KOFR 고시 조회. 이 엔진은 금리를 퍼센트로 다루므로 scale 은 1입니다.
+        fixing_history_fn=None,
         effective_date: Optional[datetime.date] = None,
         maturity_date: Optional[datetime.date] = None,
         tenor_str: str = "1Y",
@@ -231,7 +233,8 @@ class KOFRSwapPricer:
                         fix_pct = first_fixing_pct
                     fwd_kofr_rate, rate_src = floating_rate_for_period(
                         self.curve, s_d, e_d,
-                        self.curve.get_forward_compounded_rate, fix_pct)
+                        self.curve.get_forward_compounded_rate, fix_pct,
+                        history_fn=fixing_history_fn, fixing_date=f_d)
                     float_rate_total = fwd_kofr_rate + (p_spread / 100.0)
                 float_cf = p_notional * (float_rate_total / 100.0) * frac
                 float_pv = float_cf * df_pay
@@ -278,7 +281,8 @@ class KOFRSwapPricer:
                     fwd_kofr_rate, rate_src = floating_rate_for_period(
                         self.curve, calc_st, calc_ed,
                         self.curve.get_forward_compounded_rate,
-                        first_fixing_pct if idx == 0 else None)
+                        first_fixing_pct if idx == 0 else None,
+                        history_fn=fixing_history_fn, fixing_date=f_d)
                     float_rate_total = fwd_kofr_rate + (spread_bp / 100.0)
                 float_cf = notional * (float_rate_total / 100.0) * frac
                 float_pv = float_cf * df_pay

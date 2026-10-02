@@ -150,7 +150,7 @@ def push_fixings(local, target, auth, dry_run=False):
         return
 
     start = datetime.date.today() - datetime.timedelta(days=FIXING_LOOKBACK_DAYS)
-    for index in ("KRW_CD_91D", "KRW_CALL"):
+    for index in ("KRW_CD_91D", "KOFR", "KRW_CALL"):
         try:
             got = fixing_history.fetch(index, start)
         except Exception as e:
