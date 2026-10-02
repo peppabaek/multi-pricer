@@ -1305,7 +1305,11 @@ def to_ticket_draft(trade: ExtractedTrade) -> Dict[str, Any]:
         "effectiveDate": trade.effective_date or "",
         "maturityDate": trade.maturity_date or "",
         "coupon": f"{trade.fixed_coupon_pct:.4f}" if trade.fixed_coupon_pct is not None else "",
-        "spreadBp": f"{trade.spread_bp:.1f}" if trade.spread_bp is not None else "0.0",
+        # 문서가 스프레드를 말하지 않으면 빈 칸입니다. "0.0" 을 실어 보내면
+        # 화면이 그걸 문서에서 읽은 값으로 알고 입력칸에 써넣어, 트레이더가
+        # 먼저 넣어 둔 스프레드가 조용히 사라집니다. 비워 두면 프라이서가 0 으로
+        # 계산하는 것은 같고, 써넣지만 않습니다.
+        "spreadBp": f"{trade.spread_bp:.1f}" if trade.spread_bp is not None else "",
         # 문서가 말해주지 않으면 빈 칸입니다. 지어내면 안 됩니다 - 여기에 들어간
         # 숫자는 커브를 제치고 첫 쿠폰을 그대로 결정합니다.
         "firstFixing": (f"{trade.first_fixing_pct:.4f}"

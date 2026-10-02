@@ -491,7 +491,11 @@
         if (t.effectiveDate) $("in-eff").value = t.effectiveDate;
         if (t.maturityDate) $("in-mat").value = t.maturityDate;
         if (t.coupon) $("in-coupon").value = t.coupon;
-        if (t.spreadBp !== undefined && t.spreadBp !== null) $("in-spread").value = t.spreadBp;
+        // 빈 값은 "문서가 말하지 않았다" 는 뜻입니다. 덮어쓰면 트레이더가
+        // 직접 넣은 스프레드가 사라집니다.
+        if (t.spreadBp !== undefined && t.spreadBp !== null && t.spreadBp !== "") {
+            $("in-spread").value = t.spreadBp;
+        }
         if (t.crsSwapType) state.crsSwapType = t.crsSwapType;
         $("in-position").value = state.position;
         if (t.effectiveDate || t.maturityDate) $("date-block").open = true;
