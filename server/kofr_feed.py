@@ -2,6 +2,7 @@
 KOFR OIS Live Market Feed Handler
 - Connects to LSEG Workspace (Refinitiv Eikon Desktop API)
 - Primary RIC source: Tradition Seoul ('TRDS') and KMBC KOFR OIS ('KRWKFxxOIS=TRDS' / 'KMBC')
+- O/N: KRCALL=BOKK (한국은행 콜금리). KRWKOFR= 는 Workspace 에 없는 레코드입니다.
 - Manages real-time caching, thread-safe access, and manual overrides
 """
 
@@ -18,7 +19,10 @@ CONFIG_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "lse
 
 # Standard Tradition Seoul (TRDS) & KMBC KOFR OIS RIC Table
 KOFR_REAL_RIC_DEFS = [
-    {"tenor": "ON",  "ric": "KRWKOFR=",        "bid": 2.8042, "ask": 2.8042, "mid": 2.8042, "is_fix": True},
+    # KRWKOFR= 는 Workspace 에 없는 레코드입니다("The record could not be found").
+    # 그래서 O/N 은 조회해도 값이 안 들어와 기준호가에 멈춰 있었습니다.
+    # KRW CD 쪽과 같은 한국은행 콜금리를 씁니다.
+    {"tenor": "ON",  "ric": "KRCALL=BOKK",     "bid": 2.8042, "ask": 2.8042, "mid": 2.8042, "is_fix": True},
     {"tenor": "3M",  "ric": "KRWKF3MOIS=KMBC", "bid": 2.9750, "ask": 3.0250, "mid": 3.0000, "is_fix": True},
     {"tenor": "6M",  "ric": "KRWKF6MOIS=KMBC", "bid": 3.1400, "ask": 3.1900, "mid": 3.1650, "is_fix": False},
     {"tenor": "9M",  "ric": "KRWKF9MOIS=KMBC", "bid": 3.2775, "ask": 3.3275, "mid": 3.3025, "is_fix": False},
@@ -162,8 +166,14 @@ class KOFRMarketFeed:
                                 mid = round((bid + ask) / 2.0, 4)
                             elif last_val is not None and pd.notnull(last_val):
                                 mid = float(last_val)
-                                bid = round(mid - 0.01, 4)
-                                ask = round(mid + 0.01, 4)
+                                # 고시치는 한 개의 숫자입니다. 콜금리를 양방으로
+                                # 부르지 않으므로 ±1bp 를 지어내면 화면에 없는
+                                # 호가가 생깁니다. KRW CD 쪽과 같은 규칙입니다.
+                                if item.get("is_fix"):
+                                    bid = ask = round(mid, 4)
+                                else:
+                                    bid = round(mid - 0.01, 4)
+                                    ask = round(mid + 0.01, 4)
                             else:
                                 continue
 

@@ -223,6 +223,54 @@ def t_9():
 
 
 
+# ------------------------------------------------------------------ KOFR OIS
+
+@case("L34-10", "KOFR OIS 의 O/N 도 한국은행 콜금리를 쓴다")
+def t_10():
+    """
+    KRWKOFR= 는 Workspace 에 없는 레코드입니다 - 조회하면
+    "The record could not be found" 가 돌아오고, 그래서 KOFR 의 O/N 은
+    조회해도 값이 안 들어와 기준호가에 머물러 있었습니다.
+    """
+    from server.kofr_feed import KOFR_REAL_RIC_DEFS
+
+    by_tenor = {d["tenor"]: d.get("ric") for d in KOFR_REAL_RIC_DEFS}
+    if by_tenor.get("ON") != "KRCALL=BOKK":
+        raise AssertionError(f"KOFR O/N RIC 이 {by_tenor.get('ON')!r}")
+    if any(r == "KRWKOFR=" for r in by_tenor.values()):
+        raise AssertionError("없는 레코드 KRWKOFR= 가 아직 남아 있음")
+
+
+@case("L34-11", "KOFR 쪽도 고시치에 스프레드를 지어내지 않는다")
+def t_11():
+    import pandas as pd
+    import server.eikon_rate_limiter as erl
+    from server.kofr_feed import KOFRMarketFeed
+
+    rows = pd.DataFrame([
+        {"Instrument": "KRCALL=BOKK", "PRIMACT_1": None, "SEC_ACT_1": None,
+         "CF_LAST": 3.05, "CF_CLOSE": 3.048},
+        {"Instrument": "KRWKF1YOIS=KMBC", "PRIMACT_1": 3.4775, "SEC_ACT_1": 3.5275,
+         "CF_LAST": None, "CF_CLOSE": 3.50},
+    ])
+    real = erl.eikon_manager.get_data
+    erl.eikon_manager.get_data = lambda *a, **k: (rows, None)
+    try:
+        f = KOFRMarketFeed()
+        f.trigger_on_demand_refresh()
+        q = {x["tenor"]: x for x in f.get_snapshot()["quotes"]}
+    finally:
+        erl.eikon_manager.get_data = real
+
+    on = q["ON"]
+    if abs(on["mid"] - 3.05) > 1e-9:
+        raise AssertionError(f"콜금리 3.05 가 {on['mid']} 로 들어옴")
+    if on["bid"] != on["mid"] or on["ask"] != on["mid"]:
+        raise AssertionError(f"고시치에 스프레드를 붙임: {on['bid']}/{on['ask']}")
+    if q["1Y"]["bid"] >= q["1Y"]["ask"]:
+        raise AssertionError(f"1Y 양방이 사라짐: {q['1Y']['bid']}/{q['1Y']['ask']}")
+
+
 if __name__ == "__main__":
     print("\n=== L34 KRWCDIRS RIC 교체와 보간 ===")
     sys.exit(1 if run_all("L34") else 0)
