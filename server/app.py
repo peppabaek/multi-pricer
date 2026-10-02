@@ -83,6 +83,7 @@ from krw_pricer import (
     bootstrap_krw_curve, KRWSwapPricer, KRWCurve
 )
 from server.krw_feed import krw_feed
+from server.fixing_history import fixing_history, lookup as fixing_lookup
 
 # KRW KOFR OIS Engines
 from kofr_pricer import (
@@ -936,6 +937,32 @@ def relay_status_all():
     return {"status": "success", "data": relay.all_status()}
 
 
+class FixingPushRequest(BaseModel):
+    index: str = "KRW_CD_91D"
+    fixings: Dict[str, float] = {}
+
+
+@app.post("/api/fixings/push")
+def push_fixings(req: FixingPushRequest):
+    """
+    데스크 PC 가 고시 이력을 올려줍니다.
+
+    호스팅에는 Workspace 가 없으므로 과거 고시치를 직접 받을 길이 없습니다.
+    호가 중계와 같은 길로 받습니다. 이미 가지고 있는 날짜는 덮지 않습니다 -
+    한 번 고시된 값은 바뀜지 않으니, 중계가 한 번 틀린 값을 보내도 그것이
+    진실이 되지 않게 합니다.
+    """
+    added = fixing_history.put(req.index, req.fixings)
+    return {"status": "success",
+            "data": {"added": added, "coverage": fixing_history.coverage(req.index)}}
+
+
+@app.get("/api/fixings/status")
+def fixings_status(index: str = "KRW_CD_91D"):
+    """어느 구간의 고시치를 가지고 있는가."""
+    return {"status": "success", "data": fixing_history.coverage(index)}
+
+
 @app.post("/api/quotes/update")
 def update_manual_quote_usd(req: QuoteUpdateRequest):
     tradition_feed.update_quote(req.tenor, req.mid, req.bid, req.ask)
@@ -1034,6 +1061,7 @@ def calculate_krw_pricing(req: PricingRequest):
             first_fixing_pct=req.first_fixing_pct,
             leg2_reset_tenor_months=_resolve_reset_months(req.leg2_reset_tenor),
             leg2_index_day_count=req.leg2_index_day_count or "Act/365",
+            fixing_history_fn=fixing_lookup("KRW_CD_91D"),
             effective_date=eff_date,
             maturity_date=mat_date,
             tenor_str=req.tenor if req.tenor else "3Y",

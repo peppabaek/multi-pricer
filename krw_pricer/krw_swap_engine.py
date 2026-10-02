@@ -66,6 +66,9 @@ class KRWSwapPricer:
         # 이자를 30/360 으로 붙이는 거래도 금리 자체는 Act/365 로 고시됩니다.
         # 둘을 같은 것으로 쓰면 연율 환산이 어긋나 쿠폰이 1.9% 틀어집니다.
         leg2_index_day_count: Optional[str] = "Act/365",
+        # 지나간 고시치 조회. 고시일을 주면 퍼센트 금리나 None 을 돌려줍니다.
+        # 없으면 지금까지처럼 커브에서 추정합니다.
+        fixing_history_fn=None,
         effective_date: Optional[datetime.date] = None,
         maturity_date: Optional[datetime.date] = None,
         tenor_str: str = "3Y",
@@ -275,7 +278,9 @@ class KRWSwapPricer:
                 fwd_cd_rate, rate_src = floating_rate_for_period(
                     self.curve, st, reset_end,
                     lambda a, b: self.curve.get_forward_rate(a, b, l2_idx_dc),
-                    None if fix_pct is None else float(fix_pct) / 100.0)
+                    None if fix_pct is None else float(fix_pct) / 100.0,
+                    history_fn=fixing_history_fn, fixing_date=f_date,
+                    scale=0.01)
                 df = self.curve.get_df(pay_dt)
                 all_in_float_rate = fwd_cd_rate + (p_spread / 10000.0)
                 float_cf = p_notional * all_in_float_rate * frac
@@ -319,7 +324,9 @@ class KRWSwapPricer:
                 fwd_cd_rate, rate_src = floating_rate_for_period(
                     self.curve, calc_st, reset_end,
                     lambda a, b: self.curve.get_forward_rate(a, b, l2_idx_dc),
-                    None if fix_pct is None else float(fix_pct) / 100.0)
+                    None if fix_pct is None else float(fix_pct) / 100.0,
+                    history_fn=fixing_history_fn, fixing_date=f_date,
+                    scale=0.01)
                 df = self.curve.get_df(pay_dt)
                 all_in_float_rate = fwd_cd_rate + (spread_bp / 10000.0)
                 float_cf = notional * all_in_float_rate * frac

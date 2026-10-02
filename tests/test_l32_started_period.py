@@ -26,6 +26,12 @@ import io
 import os
 import sys
 
+# 고시 이력 캐시를 비워 둡니다. 이 스위트는 "이력이 없을 때 추정으로
+# 떨어지는가" 를 보는 것이라, 데스크에 이력이 쌓여 있으면 Historical 이
+# 나와 기계마다 결과가 달라집니다. 이력이 있는 쪽은 L36 이 따로 봅니다.
+import tempfile as _tempfile
+os.environ["PRICER_DATA_DIR"] = _tempfile.mkdtemp(prefix="l32-nofixings-")
+
 from harness import case, run_all
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

@@ -3051,7 +3051,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 // 숫자인지 말하지 않으면 trader 가 커브에서 나온 것으로 읽습니다.
                 const SRC = {
                     Fixing: ["고시", "거래조건서에 적힌 고시금리"],
-                    Estimated: ["추정", "이미 시작된 기간 — 같은 길이의 기간을 spot 에서 읽은 추정치"],
+                    Historical: ["고시이력", "그날 실제로 고시된 금리"],
+                    Estimated: ["추정", "이미 시작된 기간 — 고시 이력이 없어 같은 길이의 기간을 spot 에서 읽은 추정치"],
                 };
                 const src = SRC[p.rate_source];
                 const srcTag = src

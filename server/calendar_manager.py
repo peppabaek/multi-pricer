@@ -308,13 +308,21 @@ def compute_fixing_date(start_date: datetime.date, fix_day: int = -1, fix_cal: O
         return start_date
     return add_business_days(start_date, fix_day, fix_cal)
 
-def floating_rate_for_period(curve, start_date, end_date, rate_fn, fixing=None):
+def floating_rate_for_period(curve, start_date, end_date, rate_fn, fixing=None,
+                             history_fn=None, fixing_date=None, scale=1.0):
     """
     변동다리 한 기간의 금리와 그 출처를 돌려줍니다.
 
-    기간이 이미 시작됐으면 그 금리는 과거 고정일에 정해진 값입니다.
-    커브에는 없으니 거래조건서나 trader 가 준 fixing 을 먼저 쓰고, 없으면
-    같은 길이의 기간을 spot 에서 끊어 커브에서 읽습니다.
+    기간이 이미 시작됐으면 그 금리는 과거 고정일에 정해진 값입니다. 커브에는
+    없습니다 - 커브는 오늘 이후만 말합니다. 그래서 순서대로 찾습니다:
+
+        1. 거래조건서나 trader 가 준 fixing          "Fixing"
+        2. 고시 이력에서 그날 실제로 고시된 값        "Historical"
+        3. 같은 길이의 구간을 spot 에서 끊은 추정치   "Estimated"
+
+    history_fn(고시일) 이 퍼센트 금리나 None 을 돌려줍니다. scale 은 그
+    퍼센트를 rate_fn 과 같은 단위로 맞추는 값입니다 - 소수로 쓰는 엔진은
+    0.01, 퍼센트로 쓰는 엔진은 1.0.
 
     과거 시작일을 선도금리 공식에 그대로 넣으면 안 됩니다. DF 는 과거
     날짜에서 1.0 으로 잘리는데 일수는 기간 전체를 세기 때문에, 금리가
@@ -325,8 +333,8 @@ def floating_rate_for_period(curve, start_date, end_date, rate_fn, fixing=None):
     rate_fn(start, end) 이 그 구간의 금리를 돌려줍니다. 단위는 rate_fn 을
     따르니 fixing 도 같은 단위로 주십시오.
 
-    source: "Fixing" 주어진 고정치 / "Estimated" 시작된 기간의 추정치 /
-    "Forward" 약정된 선도금리.
+    source: "Fixing" 주어진 고정치 / "Historical" 그날의 고시치 /
+    "Estimated" 시작된 기간의 추정치 / "Forward" 약정된 선도금리.
     """
     if fixing is not None:
         return float(fixing), "Fixing"
@@ -334,6 +342,13 @@ def floating_rate_for_period(curve, start_date, end_date, rate_fn, fixing=None):
     pricing_date = getattr(curve, "pricing_date", None)
     if pricing_date is None or start_date >= pricing_date:
         return rate_fn(start_date, end_date), "Forward"
+
+    if history_fn is not None:
+        # 고시일을 모르면 기간 시작일로 봅니다. CD 는 시작 1영업일 전에
+        # 고시되므로, 조회 쪽에서 직전 영업일까지 거슬러 찾습니다.
+        got = history_fn(fixing_date or start_date)
+        if got is not None:
+            return float(got) * scale, "Historical"
 
     spot = getattr(curve, "settle_date", None) or pricing_date
     return rate_fn(spot, spot + (end_date - start_date)), "Estimated"

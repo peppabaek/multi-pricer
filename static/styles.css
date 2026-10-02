@@ -3044,4 +3044,5 @@ select:focus {
     vertical-align: 1px;
 }
 .rate-src--fixing { color: #065f46; background: #d1fae5; }
+.rate-src--historical { color: #1e40af; background: #dbeafe; }
 .rate-src--estimated { color: #b45309; background: #fef3c7; }

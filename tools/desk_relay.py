@@ -123,6 +123,62 @@ def feed_is_live(body):
     return False
 
 
+# 고시 이력은 매번 보낼 이유가 없습니다. 한 번 고시된 값은 바뀜지 않고,
+# 서버는 이미 가진 날짜를 덮지 않습니다. 다만 무료 플랜은 재시작하면
+# 메모리가 비므로, 드물게 다시 보내 채워 둡니다.
+FIXING_PUSH_EVERY = 30          # 틱 수
+FIXING_LOOKBACK_DAYS = 400      # 거래가 지나간 기간을 덮을 만큼
+_fixing_tick = [0]
+
+
+def push_fixings(local, target, auth, dry_run=False):
+    """
+    로\ceec 프라이서가 받아 둔 고시 이력을 클라우드로 올린다.
+
+    호스팅에는 Workspace 가 없어 과거 고시치를 직접 받을 길이 없습니다.
+    개시일이 지난 거래조건서는 그것이 없으면 추정으로 떨어집니다.
+    """
+    stamp = datetime.datetime.now().strftime("%H:%M:%S")
+    try:
+        import sys as _sys
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if root not in _sys.path:
+            _sys.path.insert(0, root)
+        from server.fixing_history import fixing_history, INDEX_RICS
+    except Exception as e:
+        print(f"  [{stamp}] 고시 이력 모듈을 읽지 못함: {e}")
+        return
+
+    start = datetime.date.today() - datetime.timedelta(days=FIXING_LOOKBACK_DAYS)
+    for index in ("KRW_CD_91D", "KRW_CALL"):
+        try:
+            got = fixing_history.fetch(index, start)
+        except Exception as e:
+            print(f"  [{stamp}] {index} 조회 실패: {e}")
+            got = 0
+        days = {}
+        cur = start
+        today = datetime.date.today()
+        while cur <= today:
+            rate, used = fixing_history.get(index, cur)
+            if rate is not None and used == cur.isoformat():
+                days[used] = rate
+            cur += datetime.timedelta(days=1)
+        if not days:
+            print(f"  [{stamp}] {index} 보낼 고시치 없음")
+            continue
+        if dry_run:
+            print(f"  [{stamp}] {index} {len(days)}일 (전송 안 함, 신규 {got})")
+            continue
+        try:
+            res = call(f"{target}/api/fixings/push",
+                       {"index": index, "fixings": days}, auth=auth)
+            d = res.get("data", {})
+            print(f"  [{stamp}] {index} {len(days)}일 전송 · 서버 신규 {d.get('added', 0)}")
+        except Exception as e:
+            print(f"  [{stamp}] {index} 전송 실패: {e}")
+
+
 def push_once(local, target, auth, currencies, origin, dry_run=False):
     stamp = datetime.datetime.now().strftime("%H:%M:%S")
     for cur in currencies:
@@ -215,6 +271,14 @@ def main():
     print()
 
     while True:
+        # 고시 이력은 호가 중계와 다릅니다. 호가는 로컬이 LSEG 에 붙어
+        # 있을 때만 보냅니다 - 기준호가를 중계하면 근거 없는 숫자가 실시간처럼
+        # 보입니다. 고시치는 이미 공시된 사실이고 바뀜지 않으므로, 지금
+        # Workspace 가 끊겨 있어도 캨시에 있는 것은 보내도 됩니다.
+        if _fixing_tick[0] % FIXING_PUSH_EVERY == 0:
+            push_fixings(a.local, a.target.rstrip("/"), auth, a.dry_run)
+        _fixing_tick[0] += 1
+
         push_once(a.local, a.target.rstrip("/"), auth, currencies,
                   a.origin, a.dry_run)
         if a.once:

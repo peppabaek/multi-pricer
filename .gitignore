@@ -122,3 +122,6 @@ _preview/
 
 # 자동 실행 로그 (desk_autostart.ps1)
 logs/
+
+# 고시 이력 캨시. LSEG 에서 받아 다시 만들 수 있고, 데스크마다 다릅니다.
+fixings_cache.json
