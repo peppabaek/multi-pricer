@@ -247,13 +247,11 @@
         const url = reload ? p.reload : p.price;
         busy(true, reload ? "시세 갱신 후 계산 중…" : "계산 중…");
         try {
-            const resp = await fetch(url, {
+            const json = await C.requestJSON(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(C.buildRequest(state)),
             });
-            const json = await resp.json();
-            if (!resp.ok) throw new Error(json.detail || ("HTTP " + resp.status));
             state.priced = json.data;
             state.pricedAt = Date.now();
             notice("");
@@ -289,13 +287,11 @@
         try {
             const body = Object.assign(C.buildRequest(state), { target_mtm: target });
             delete body.fixed_coupon_pct;      // 구하려는 값입니다
-            const r = await fetch("/api/solve-rate", {
+            const j = await C.requestJSON("/api/solve-rate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body),
             });
-            const j = await r.json();
-            if (!r.ok) throw new Error(j.detail || ("HTTP " + r.status));
             const d = j.data;
 
             // 구한 금리를 쿠폰 칸에 넣고 바로 프라이싱합니다. 숫자만 보여주고
@@ -332,7 +328,10 @@
     // 분석은 보통 20초 안에 끝나지만, 프리티어가 분당 한도에 걸리면 사다리를
     // 걷느라 2분까지 갑니다. 브라우저 기본 동작에 맡기면 아무 설명 없이 끊기고
     // "fetch error" 만 남습니다. 직접 끊고 무슨 일인지 말합니다.
-    const UPLOAD_TIMEOUT_MS = 150000;
+    // 데스크톱은 시한을 두지 않고 기다립니다. 휴대폰만 150초에 끊어졌는데,
+    // 무료 플랜은 유휴 뒤 첫 요청에 1분가량 길려지고 휴대폰 사진은 올리는 데만도
+    // 시간이 걸려, 아침 첫 사용에서 휴대폰만 단독으로 중단될 수 있었습니다.
+    const UPLOAD_TIMEOUT_MS = 240000;
 
     async function uploadTermsheet(fileList) {
         // 여러 장일 수 있습니다. 고른 순서를 그대로 보냅니다 - 2쪽의 스케줄이
@@ -362,10 +361,12 @@
                 chosen.forEach((f, i) =>
                     body.append("files", f, f.name || `page-${i + 1}`));
             }
-            const resp = await fetch("/api/termsheet/extract",
-                                     { method: "POST", body, signal: ctl.signal });
-            const json = await resp.json();
-            if (!resp.ok) throw new Error(json.detail || ("HTTP " + resp.status));
+            // 분석은 분 단위라 재시도하지 않습니다. 두 번 돌리면 기다림이
+            // 두 배가 되고, 그사이 휴대폰은 화면을 재워 버립니다.
+            const json = await C.requestJSON(
+                "/api/termsheet/extract",
+                { method: "POST", body, signal: ctl.signal },
+                { retry: false });
             const data = json.data;
             if (!data.supported) {
                 notice("평가 불가: " + (data.unsupported_reason || "알 수 없음"), true);

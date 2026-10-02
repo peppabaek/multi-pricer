@@ -1591,13 +1591,11 @@ document.addEventListener("DOMContentLoaded", () => {
             payload.target_mtm = target;
             delete payload.fixed_coupon_pct;      // 구하려는 값입니다
 
-            const resp = await fetch("/api/solve-rate", {
+            const json = await PricingCore.requestJSON("/api/solve-rate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
             });
-            const json = await resp.json();
-            if (!resp.ok) throw new Error(json.detail || ("HTTP " + resp.status));
             const d = json.data;
 
             // 구한 금리를 쿠폰 칸에 넣고 바로 프라이싱합니다. 숫자만 띄우고
@@ -1635,13 +1633,11 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const payload = buildPricingPayload();
             const endpoint = getPriceEndpoint();
-            const resp = await fetch(endpoint, {
+            const json = await PricingCore.requestJSON(endpoint, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
             });
-
-            const json = await resp.json();
             if (json.status === "success") {
                 state.pricingResult = json.data;
                 // Auto populate Leg 1 Fixed Coupon with equilibrium Par swap rate (Deal NPV = 0)
@@ -1800,13 +1796,11 @@ document.addEventListener("DOMContentLoaded", () => {
             };
 
             const endpoint = getReloadAndPriceEndpoint();
-            const resp = await fetch(endpoint, {
+            const json = await PricingCore.requestJSON(endpoint, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
             });
-
-            const json = await resp.json();
             if (json.status === "success") {
                 // Update Market Snapshot & Curve
                 const snap = json.market_snapshot || json;
@@ -2089,13 +2083,10 @@ document.addEventListener("DOMContentLoaded", () => {
         tsAbort = new AbortController();
 
         try {
-            const resp = await fetch("/api/termsheet/extract", {
+            // 분석은 분 단위라 재시도하지 않습니다 - 두 번 돌리면 기다림이 두 배입니다.
+            const json = await PricingCore.requestJSON("/api/termsheet/extract", {
                 method: "POST", body, signal: tsAbort.signal,
-            });
-            const json = await resp.json();
-            if (!resp.ok) {
-                throw new Error(json.detail || `HTTP ${resp.status}`);
-            }
+            }, { retry: false });
             const data = json.data;
             if (!data.supported) {
                 tsShow("idle");

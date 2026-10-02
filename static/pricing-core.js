@@ -240,9 +240,80 @@
         return n === null ? "" : n.toLocaleString("en-US", { maximumFractionDigits: 0 });
     }
 
+    /**
+     * 응답을 JSON 으로 읽는다. JSON 이 아니면 읽힐 말로 바꿔 던진다.
+     *
+     * 서버가 JSON 을 돌려주지 않는 때가 있습니다. 무료 플랜이 유휴에서 깨어나는
+     * 동안의 502 페이지, 인증이 풀렸을 때의 로그인 화면, 프록시가 끊은 요청 -
+     * 전부 HTML 입니다. 그걸 resp.json() 에 그대로 넣으면
+     * "Unexpected token '<'" 가 뜨고, 트레이더는 무엇이 잘못됐는지 알 수
+     * 없습니다. 휴대폰에서는 연결이 끊기도 해서 "Failed to fetch" 도 같이 나옵니다.
+     *
+     * 깨어나는 중에 받은 502·503·504 나 끊긴 연결은 한 번 다시 시도합니다. 다만
+     * 오래 기다리다 실패한 것은 다시 해도 오래 걸리므로, 금방 돌아온 실패만
+     * 재시도합니다 - 사진 분석을 두 번 돌리면 기다림이 두 배가 됩니다.
+     */
+    async function requestJSON(url, init, opts) {
+        const o = opts || {};
+        const quickMs = o.quickMs === undefined ? 10000 : o.quickMs;
+        let attempts = o.retry === false ? 1 : 2;
+        let lastErr = null;
+
+        while (attempts-- > 0) {
+            const t0 = Date.now();
+            let resp;
+            try {
+                resp = await fetch(url, init);
+            } catch (err) {
+                if (err && err.name === "AbortError") throw err;
+                lastErr = new Error(
+                    "서버에 연결하지 못했습니다 — 네트워크나 서버 상태를 확인하세요");
+                if (attempts > 0 && Date.now() - t0 < quickMs) {
+                    await new Promise((r) => setTimeout(r, 2500));
+                    continue;
+                }
+                throw lastErr;
+            }
+
+            const text = await resp.text();
+            let body = null;
+            try {
+                body = text ? JSON.parse(text) : null;
+            } catch (e) {
+                body = null;
+            }
+
+            if (body !== null) {
+                if (!resp.ok) {
+                    throw new Error(body.detail || body.message
+                                    || ("서버 오류 " + resp.status));
+                }
+                return body;
+            }
+
+            // JSON 이 아닙니다. 상태코드로 무슨 일인지 말해 줍니다.
+            const waking = resp.status === 502 || resp.status === 503
+                        || resp.status === 504;
+            lastErr = new Error(
+                waking
+                    ? "서버가 깨어나는 중입니다 (" + resp.status
+                      + ") — 잠시 뒤 다시 시도해 주세요"
+                    : resp.status === 401 || resp.status === 403
+                        ? "로그인이 풀렸습니다 — 페이지를 새로고침해 주세요"
+                        : "서버가 " + resp.status + " 를 돌려줬습니다 ("
+                          + (text || "").trim().slice(0, 60) + ")");
+            if (attempts > 0 && waking && Date.now() - t0 < quickMs) {
+                await new Promise((r) => setTimeout(r, 2500));
+                continue;
+            }
+            throw lastErr;
+        }
+        throw lastErr || new Error("요청에 실패했습니다");
+    }
+
     root.PricingCore = {
         PRODUCTS, ORDER, readResults, buildRequest, overridesFromTicket,
         feedState, relayFor, money, pct, commas, numOrNull, numOrDefault,
-        TS_FIELD_KEY,
+        TS_FIELD_KEY, requestJSON,
     };
 })(window);
