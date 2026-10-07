@@ -7,6 +7,7 @@ import os
 import json
 import re
 import sys
+import collections
 import datetime
 
 # `python server/app.py` 로도 열리도록.
@@ -1770,23 +1771,44 @@ def parse_rollercoaster_endpoint(req: RollercoasterParseRequest):
 # FORWARD SWAP POINT PRICER API ENDPOINTS (KMBC & CIP Hybrid Model)
 # ==============================================================================
 
-_CURVE_CACHE: Dict[Any, Any] = {}
+# 캠시 키에 호가와 현물이 통째로 들어갑니다. 호가가 움직일 때마다 새
+# 항목이 쌓이고, 예전에는 지워지지 않았습니다. 현물을 중계하기 전에는
+# 호스팅 쪽 현물이 기준호가에 멈춰 있어 키가 거의 바뀌지 않았고, 그래서
+# 드러나지 않았습니다. 30초마다 커브 하나씩 쌓이면 512MB 인스턴스가
+# 버틸 수 없습니다.
+_CURVE_CACHE: "OrderedDict[Any, Any]" = collections.OrderedDict()
+_CURVE_CACHE_MAX = 64
+
+
+def _cache_put(key, curve):
+    """가장 오래 안 쓴 것부터 내보냅니다."""
+    _CURVE_CACHE[key] = curve
+    _CURVE_CACHE.move_to_end(key)
+    while len(_CURVE_CACHE) > _CURVE_CACHE_MAX:
+        _CURVE_CACHE.popitem(last=False)
+    return curve
+
+
+def _cache_get(key):
+    curve = _CURVE_CACHE.get(key)
+    if curve is not None:
+        _CURVE_CACHE.move_to_end(key)
+    return curve
+
 
 def get_cached_sofr_curve(p_date: datetime.date, s_date: datetime.date, usd_quotes: List[Tuple[str, float]]) -> SOFRCurve:
     key = ("USD_SOFR", p_date, s_date, tuple(usd_quotes))
-    if key in _CURVE_CACHE:
-        return _CURVE_CACHE[key]
-    curve = bootstrap_sofr_curve(p_date, s_date, usd_quotes)
-    _CURVE_CACHE[key] = curve
-    return curve
+    hit = _cache_get(key)
+    if hit is not None:
+        return hit
+    return _cache_put(key, bootstrap_sofr_curve(p_date, s_date, usd_quotes))
 
 def get_cached_crs_curve(p_date: datetime.date, s_date: datetime.date, crs_quotes: List[Tuple[str, float]], spot_fx: float) -> KRWFXSOFRCurve:
     key = ("KRW_CRS", p_date, s_date, tuple(crs_quotes), round(spot_fx, 2))
-    if key in _CURVE_CACHE:
-        return _CURVE_CACHE[key]
-    curve = bootstrap_crs_curve(p_date, s_date, crs_quotes, spot_fx)
-    _CURVE_CACHE[key] = curve
-    return curve
+    hit = _cache_get(key)
+    if hit is not None:
+        return hit
+    return _cache_put(key, bootstrap_crs_curve(p_date, s_date, crs_quotes, spot_fx))
 
 @app.get("/api/fwd/market-snapshot")
 def get_fwd_market_snapshot(pricing_date: Optional[str] = None, reload: Optional[bool] = False):

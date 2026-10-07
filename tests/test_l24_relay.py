@@ -653,6 +653,28 @@ def t_28():
         raise AssertionError(f"출처가 {d.get('spot_fx_tick')!r}")
 
 
+@case("L24-29", "호가가 움직여도 커브 캐시가 무한히 늘지 않는다")
+def t_29():
+    """
+    캐시 키에 호가와 현물이 통째로 들어갑니다. 현물을 중계하기 전에는 호스팅
+    쪽 현물이 기준호가에 멈춰 있어 키가 거의 바뀌지 않았고, 그래서 드러나지
+    않았습니다. 30초마다 커브 하나씩 쌓이면 512MB 인스턴스가 버티지 못합니다.
+    """
+    from fastapi.testclient import TestClient
+    from server.app import app, _CURVE_CACHE, _CURVE_CACHE_MAX
+
+    c = TestClient(app)
+    for i in range(_CURVE_CACHE_MAX * 2):
+        spot = round(1300.0 + i * 0.37, 2)
+        c.post("/api/quotes/push", json={"currency": "FWD", "quotes": [
+            {"tenor": "SPOT_FX", "mid": spot, "bid": spot - 0.1, "ask": spot + 0.1}]})
+        r = c.get("/api/fwd/market-snapshot")
+        if r.status_code != 200:
+            raise AssertionError(f"{i}회에서 HTTP {r.status_code}")
+    if len(_CURVE_CACHE) > _CURVE_CACHE_MAX:
+        raise AssertionError(f"캐시가 {len(_CURVE_CACHE)}개 - 상한 {_CURVE_CACHE_MAX}")
+
+
 if __name__ == "__main__":
     print("\n=== L24 데스크 → 클라우드 중계 ===")
     sys.exit(1 if run_all("L24") else 0)
