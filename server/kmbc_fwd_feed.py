@@ -112,6 +112,7 @@ class KMBCFwdFeed:
                 self.status_message = "● LIVE LSEG Workspace (KMBC Swap Points)"
                 now_str = datetime.datetime.now().strftime("%H:%M:%S (Live)")
                 with self._lock:
+                    live_tenors = set()
                     for _, row in df.iterrows():
                         ric = str(row.get("Instrument", "")).strip()
                         if ric == "KRW=":
@@ -159,7 +160,11 @@ class KMBCFwdFeed:
                                 if chg is not None:
                                     q["chg"] = round(chg, 2)
                                 q["last_tick"] = now_str
+                                q["quoted"] = bid is not None or ask is not None
+                                if q["quoted"]:
+                                    live_tenors.add(tenor)
 
+                    self._fill_unquoted(live_tenors, now_str)
                     self.last_update = datetime.datetime.now()
                 print(f"[KMBC FWD FEED] Successfully loaded live quotes. 1Y Mid: {self.quotes['1Y']['mid']}전 ({self.quotes['1Y']['mid_krw']}원), Spot FX: {self.spot_fx}")
                 return True
@@ -170,6 +175,56 @@ class KMBCFwdFeed:
             print(f"[KMBC FWD FEED ERROR] Live quote fetch exception: {ex}")
             traceback.print_exc()
             return False
+
+    # 테너를 날짜로 재는 표. 보간은 개월 수가 아니라 일수로 해야
+    # 1W 와 1M 사이가 제대로 나뉩니다.
+    _TENOR_DAYS = {"1W": 7, "2W": 14, "1M": 30, "2M": 61, "3M": 91,
+                   "6M": 182, "9M": 273, "1Y": 365}
+
+    def _fill_unquoted(self, live_tenors, now_str):
+        """
+        호가가 안 들어온 테너를 어떻게 할 것인가.
+
+        KRW2W=KMBC 는 존재하는 레코드인데 값이 비어 옵니다 - 브로커가 그날
+        그 구간을 부르지 않은 것이고, 흔한 일입니다. 예전에는 기준호가가 그대로
+        남아 화면에는 실시간처럼 보였습니다. 그것이 제일 나쁜 답입니다 - 데스크가
+        몇 달 전 숫자를 오늘 호가로 읽게 됩니다.
+
+        양쪽에 살아있는 테너가 있으면 그 사이를 일수로 선형보간하고 보간이라고
+        밝힙니다. 없으면 값은 그대로 두되 "호가없음" 으로 표시해, 화면이 그걸
+        실시간으로 읽지 않게 합니다.
+        """
+        order = [q["tenor"] for q in self.DEFAULT_KMBC_QUOTES]
+        for i, tenor in enumerate(order):
+            if tenor in live_tenors:
+                continue
+            q = self.quotes.get(tenor)
+            if q is None:
+                continue
+            lo = next((t for t in reversed(order[:i]) if t in live_tenors), None)
+            hi = next((t for t in order[i + 1:] if t in live_tenors), None)
+            if lo and hi:
+                d_lo, d_hi = self._TENOR_DAYS.get(lo), self._TENOR_DAYS.get(hi)
+                d_t = self._TENOR_DAYS.get(tenor)
+                if d_lo and d_hi and d_t and d_hi > d_lo:
+                    w = (d_t - d_lo) / float(d_hi - d_lo)
+                    a, b = self.quotes[lo], self.quotes[hi]
+                    for key in ("bid", "ask", "mid"):
+                        va, vb = a.get(key), b.get(key)
+                        if va is None or vb is None:
+                            continue
+                        q[key] = round(va + (vb - va) * w, 2)
+                    for key in ("bid", "ask", "mid"):
+                        q[key + "_krw"] = (round(q[key] / 100.0, 4)
+                                           if q["type"] == "Outright" and q.get(key) is not None
+                                           else q.get(key))
+                    q["quoted"] = False
+                    q["interp_from"] = [lo, hi]
+                    q["last_tick"] = now_str.split(" ")[0] + f" (Interp {lo}·{hi})"
+                    continue
+            q["quoted"] = False
+            q.pop("interp_from", None)
+            q["last_tick"] = now_str.split(" ")[0] + " (호가없음)"
 
     def get_snapshot(self, force_refresh: bool = False) -> Dict[str, Any]:
         if force_refresh:

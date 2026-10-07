@@ -271,6 +271,66 @@ def t_11():
 
 
 
+# --------------------------------------------- USD SOFR / FX FWD 단기 RIC
+
+@case("L34-12", "USD SOFR 1W 이 살아 있는 RIC 을 쓴다")
+def t_12():
+    """
+    USDSROISSW=TWEB 은 Workspace 에 없는 레코드라("The record could not be
+    found") 1W 만 조회해도 값이 안 들어오고 기준호가에 머물러 있었습니다.
+    """
+    from server.tradition_feed import TRADITION_REAL_RIC_DEFS as DEFS
+
+    by_tenor = {d["tenor"]: d.get("ric") for d in DEFS}
+    if by_tenor.get("1W") != "USDSROIS1W=TWEB":
+        raise AssertionError(f"1W RIC 이 {by_tenor.get('1W')!r}")
+    if any(r == "USDSROISSW=TWEB" for r in by_tenor.values()):
+        raise AssertionError("없는 레코드 USDSROISSW=TWEB 가 아직 남아 있음")
+
+
+@case("L34-13", "호가가 없는 FX FWD 테너는 양옆에서 보간한다")
+def t_13():
+    """
+    KRW2W=KMBC 는 존재하는 레코드인데 값이 비어 옵니다 - 브로커가 그날 그
+    구간을 부르지 않은 것이고 흔한 일입니다. 예전에는 기준호가가 그대로 남아
+    화면에는 실시간처럼 보였습니다. 몇 달 전 숫자를 오늘 호가로 읽게 됩니다.
+    """
+    from server.kmbc_fwd_feed import KMBCFwdFeed
+
+    f = KMBCFwdFeed()
+    f.quotes["1W"].update({"bid": -53.0, "ask": -3.0, "mid": -28.0})
+    f.quotes["1M"].update({"bid": -150.0, "ask": -50.0, "mid": -100.0})
+    f._fill_unquoted({"1W", "1M"}, "10:00:00 (Live)")
+
+    q = f.quotes["2W"]
+    if q.get("quoted") is not False:
+        raise AssertionError("보간한 테너를 호가로 표시")
+    if q.get("interp_from") != ["1W", "1M"]:
+        raise AssertionError(f"보간 기준점이 {q.get('interp_from')}")
+    # 1W(7일) 과 1M(30일) 사이 14일 -> 가중치 7/23
+    want = round(-28.0 + (-100.0 - -28.0) * (7 / 23.0), 2)
+    if abs(q["mid"] - want) != 0:
+        raise AssertionError(f"mid {q['mid']} vs 선형 기대값 {want}")
+    if not (q["bid"] < q["mid"] < q["ask"] or q["bid"] > q["mid"] > q["ask"]):
+        raise AssertionError(f"보간 후 bid/mid/ask 순서가 깨짐: {q['bid']}/{q['mid']}/{q['ask']}")
+
+
+@case("L34-14", "양옆도 없으면 호가가 없다고 말한다")
+def t_14():
+    """지어낼 근거가 없을 때는 지어내지 않고 그렇다고 적습니다."""
+    from server.kmbc_fwd_feed import KMBCFwdFeed
+
+    f = KMBCFwdFeed()
+    f._fill_unquoted(set(), "10:00:00 (Live)")
+    q = f.quotes["2W"]
+    if q.get("quoted") is not False:
+        raise AssertionError("호가가 없는데 호가로 표시")
+    if q.get("interp_from"):
+        raise AssertionError("보간할 수 없는데 보간했다고 표시")
+    if "호가없음" not in str(q.get("last_tick")):
+        raise AssertionError(f"last_tick 이 {q.get('last_tick')!r}")
+
+
 if __name__ == "__main__":
     print("\n=== L34 KRWCDIRS RIC 교체와 보간 ===")
     sys.exit(1 if run_all("L34") else 0)

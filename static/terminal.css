@@ -242,15 +242,21 @@ input[type="text"], input[type="number"], input[type="date"], select {
 }
 
 /* ---------- stat pills: data first --------------------------------------- */
+/* 칸을 네 등분하고 min-width:0 으로 내용보다 작게 줄였는데, 안의 값은
+   nowrap 이라 박스를 넘겨 그려졌습니다. 스왓 화면의 "4.0150%" 는 맞았지만
+   FX FWD 의 "-1.75 원 (-175.0전)" 은 152px 라 1680px 에서도 옮 칸을 덮었고,
+   화면에는 글자가 격는 것처럼 보였습니다. 내용만큼 넓히고, 모자라면
+   줄을 바꿔 내려갑니다. */
 .quick-stats-strip {
     background: var(--t-sunk);
     border-bottom: 1px solid var(--t-line-soft);
     gap: 0;
     padding: 0;
     display: flex;
+    flex-wrap: wrap;
 }
 .stat-pill {
-    flex: 1;
+    flex: 1 1 auto;
     background: transparent;
     border: none;
     border-right: 1px solid var(--t-line-soft);
@@ -259,7 +265,7 @@ input[type="text"], input[type="number"], input[type="date"], select {
     display: flex;
     flex-direction: column;
     gap: 1px;
-    min-width: 0;
+    min-width: max-content;
 }
 .stat-pill:last-child { border-right: none; }
 .stat-lbl {
@@ -271,7 +277,14 @@ input[type="text"], input[type="number"], input[type="date"], select {
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.stat-val { font-size: 14px; font-weight: 600; color: var(--t-ink); }
+/* 그래도 모자라는 것이 있으면 옮 칸을 덮는 대신 줄임표를 붙입니다. */
+.stat-val {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--t-ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .stat-val.stat-fix { color: var(--t-accent); }
 
 /* ---------- hero result cards: the three numbers that matter ------------- */

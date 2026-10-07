@@ -459,3 +459,45 @@ body { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
 }
 .m-solve-out[hidden] { display: none; }
 .m-solve-out.bad { background: #fee2e2; border-color: #fca5a5; color: #7f1d1d; }
+
+/* 시험 운영 표기는 데스크톱과 같은 규칙을 씁니다 - m.css 는 styles.css 를
+   싣지 않으므로 여기에도 둡니다. */
+.test-tag {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: #fef3c7;
+    color: #b45309;
+    border: 1px solid #fcd34d;
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: .06em;
+    white-space: nowrap;
+    margin-left: 6px;
+}
+.test-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(15, 23, 42, .6);
+}
+.test-modal[hidden] { display: none; }
+.test-modal-box {
+    width: 100%;
+    max-height: 86vh;
+    overflow: auto;
+    background: #fff;
+    border-radius: 12px;
+    padding: 18px;
+}
+.test-modal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.test-modal-head h2 { margin: 0; font-size: 16px; }
+.test-modal-box p { margin: 0 0 12px; font-size: 13.5px; line-height: 1.65; color: #334155; }
+.test-modal-skip {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 12px; font-size: 13px; color: #475569;
+}

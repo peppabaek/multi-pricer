@@ -23,7 +23,9 @@ from .eikon_rate_limiter import EIKON_GLOBAL_LOCK, safe_eikon_get_data
 # Exact 31 Tradition SOFR OIS RIC Table matching Murex Standard
 TRADITION_REAL_RIC_DEFS = [
     {"tenor": "ON",  "ric": "USDSOFR=",         "bid": 3.6500, "ask": 3.6500, "mid": 3.6500, "is_fix": True},
-    {"tenor": "1W",  "ric": "USDSROISSW=TWEB",  "bid": 3.6210, "ask": 3.6410, "mid": 3.6310, "is_fix": False},
+    # USDSROISSW=TWEB 는 Workspace 에 없는 레코드입니다("The record could not be
+    # found"). 조회해도 값이 안 들어와 1W 만 기준호가에 머물러 있었습니다.
+    {"tenor": "1W",  "ric": "USDSROIS1W=TWEB",  "bid": 3.6210, "ask": 3.6410, "mid": 3.6310, "is_fix": False},
     {"tenor": "2W",  "ric": "USDSROIS2W=TWEB",  "bid": 3.6740, "ask": 3.6940, "mid": 3.6840, "is_fix": False},
     {"tenor": "1M",  "ric": "USDSROIS1M=TWEB",  "bid": 3.7300, "ask": 3.7500, "mid": 3.7400, "is_fix": False},
     {"tenor": "2M",  "ric": "USDSROIS2M=TWEB",  "bid": 3.7680, "ask": 3.7880, "mid": 3.7780, "is_fix": False},

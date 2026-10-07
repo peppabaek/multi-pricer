@@ -3045,4 +3045,84 @@ select:focus {
 }
 .rate-src--fixing { color: #065f46; background: #d1fae5; }
 .rate-src--historical { color: #1e40af; background: #dbeafe; }
+.rate-src--none { color: #9f1239; background: #ffe4e6; }
 .rate-src--estimated { color: #b45309; background: #fef3c7; }
+
+/* 시험 운영 표기. 헤더에 늘 떠 있고, 최초 1회 팝업으로 한 번 더 말합니다.
+   운영 전환 때는 이 두 군데(.test-tag 와 #test-notice)만 지우면 됩니다. */
+.test-tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: #fef3c7;
+    color: #b45309;
+    border: 1px solid #fcd34d;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.test-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(15, 23, 42, .55);
+}
+.test-modal[hidden] { display: none; }
+
+.test-modal-box {
+    width: min(420px, 100%);
+    max-height: 90vh;
+    overflow: auto;
+    background: #ffffff;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .3);
+}
+.test-modal-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.test-modal-head h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: #0f172a;
+}
+.test-modal-box p {
+    margin: 0 0 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #334155;
+}
+.test-modal-box ul {
+    margin: 0 0 12px;
+    padding-left: 18px;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: #475569;
+}
+.test-modal-skip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+    font-size: 12.5px;
+    color: #475569;
+    cursor: pointer;
+}
+.test-modal-box button {
+    width: 100%;
+    padding: 10px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+}

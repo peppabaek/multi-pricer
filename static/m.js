@@ -521,6 +521,38 @@
 
     // ---- 잡다 --------------------------------------------------------------
 
+    /**
+     * 시험 운영 고지. 하루에 한 번만 띄우고, 고르면 그날은 다시 안 띄웁니다.
+     *
+     * localStorage 는 비어 있거나 던져나올 수 있습니다(사생모드, 사이트
+     * 데이터 삭제). 그럴 때는 그냥 다시 보여 주는 쪽이 맞습니다 - 고지를
+     * 못 보여 주는 것보다 한 번 더 보여 주는 편이 낫습니다.
+     */
+    function initTestNotice() {
+        var box = document.getElementById("test-notice");
+        if (!box) return;
+        var KEY = "multipricer.testNoticeSkipUntil";
+        var today = new Date().toISOString().slice(0, 10);
+        var skip = "";
+        try { skip = window.localStorage.getItem(KEY) || ""; } catch (e) { skip = ""; }
+        if (skip !== today) box.hidden = false;
+
+        var ok = document.getElementById("test-notice-ok");
+        var chk = document.getElementById("test-notice-skip");
+        if (ok) {
+            ok.addEventListener("click", function () {
+                box.hidden = true;
+                if (chk && chk.checked) {
+                    try { window.localStorage.setItem(KEY, today); } catch (e) {}
+                }
+            });
+        }
+        // 바깥을 눌러도 닫힙니다. 고지일 뿐이라 가두고 막을 이유가 없습니다.
+        box.addEventListener("click", function (e) {
+            if (e.target === box) box.hidden = true;
+        });
+    }
+
     function setCurrency(cur) {
         if (cur === state.currency) return;
         state.currency = cur;
@@ -569,6 +601,7 @@
         paintInputs();
         paintResults();
 
+        initTestNotice();
         $("btn-price").addEventListener("click", () => price(false));
         $("btn-reload").addEventListener("click", () => price(true));
         $("feed-badge").addEventListener("click", () => { toast("시세 상태 확인 중…"); pollFeed(); });

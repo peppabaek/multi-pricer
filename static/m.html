@@ -25,8 +25,25 @@
 
 <header class="m-head">
     <span class="m-logo">MULTI<b>PRICER</b></span>
+    <span class="test-tag" title="시험 운영 중입니다">TEST</span>
     <button type="button" class="m-feed" id="feed-badge" title="시세 출처">● …</button>
 </header>
+
+<div class="test-modal" id="test-notice" hidden>
+    <div class="test-modal-box" role="dialog" aria-modal="true">
+        <div class="test-modal-head">
+            <span class="test-tag">TEST</span>
+            <h2>시험 운영 버전입니다</h2>
+        </div>
+        <p>검증 중인 시험 버전입니다. 계산 결과를 실거래 확정이나 평가의
+           근거로 사용하지 마십시오. 호가가 실시간이 아닐 수 있으니 상단
+           시세 표시를 확인하세요.</p>
+        <label class="test-modal-skip">
+            <input type="checkbox" id="test-notice-skip"> 오늘은 다시 보지 않기
+        </label>
+        <button type="button" class="m-btn" id="test-notice-ok">확인했습니다</button>
+    </div>
+</div>
 
 <nav class="m-tabs" id="product-tabs" aria-label="상품 선택"></nav>
 

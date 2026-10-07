@@ -1239,6 +1239,7 @@ def price_swap_kofr(req: PricingRequest):
             fixed_coupon_pct=req.fixed_coupon_pct,
             spread_bp=req.spread_bp,
             first_fixing_pct=req.first_fixing_pct,
+            fixing_history_fn=fixing_lookup("KOFR"),
             effective_date=eff_date,
             maturity_date=mat_date,
             tenor_str=req.tenor if req.tenor else "1Y",

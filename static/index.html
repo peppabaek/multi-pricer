@@ -47,6 +47,7 @@
                 <span class="logo-icon">⚡</span>
                 <h1 class="app-title">MULTI<span class="highlight">PRICER</span></h1>
                 <span class="version-tag">v3.0 PRO</span>
+                <span class="test-tag" title="시험 운영 중입니다. 실거래 확정에 사용하지 마세요">TEST</span>
             </div>
 
             <!-- Currency / Product Toggle Switcher -->
@@ -1261,6 +1262,29 @@
     </div>
 
     <!-- Notification Toast -->
+    <!-- 최초 1회 고지. 시험 운영이라는 것을 사용자가 한 번은 읽고
+         넘어가게 합니다. 연산은 그동안 그대로 돌아갑니다. -->
+    <div class="test-modal" id="test-notice" hidden>
+        <div class="test-modal-box" role="dialog" aria-modal="true"
+             aria-labelledby="test-notice-title">
+            <div class="test-modal-head">
+                <span class="test-tag">TEST</span>
+                <h2 id="test-notice-title">시험 운영 버전입니다</h2>
+            </div>
+            <p>이 프라이서는 검증 중인 시험 버전입니다. 계산 결과를
+               실거래 확정이나 평가의 근거로 사용하지 마십시오.</p>
+            <ul>
+                <li>호가가 실시간이 아닐 수 있습니다 — 화면 오른쪽 상태 표시를 확인하세요.</li>
+                <li>읽어들인 거래조건은 반드시 원본과 대조하세요.</li>
+                <li>중요한 건은 기존 시스템과 대사해 주십시오.</li>
+            </ul>
+            <label class="test-modal-skip">
+                <input type="checkbox" id="test-notice-skip"> 오늘은 다시 보지 않기
+            </label>
+            <button type="button" class="btn-primary" id="test-notice-ok">확인했습니다</button>
+        </div>
+    </div>
+
     <div class="toast-container" id="toast-container"></div>
 
     <!-- 휴대폰 화면과 같은 모듈. 응답을 JSON 으로 읽는 requestJSON 을 두 화면이

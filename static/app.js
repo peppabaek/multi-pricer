@@ -15,6 +15,10 @@ window.fwdMarketSnapshot = null;
 var fwdMarketSnapshot = null;
 
 document.addEventListener("DOMContentLoaded", () => {
+    // 시험 운영 고지는 맨 앞에서 띄웁니다. 뒤에 두면 시세를 불러오다 멈췄을 때
+    // 고지가 영영 안 뜹니다 - 그때야말로 시험 버전이라는 말이 필요한 순간입니다.
+    initTestNotice();
+
     window.fwdMarketSnapshot = null;
     var fwdMarketSnapshot = null;
 
@@ -4369,15 +4373,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 const q6m = quotes.find(q => q.tenor === "6M");
                 if (elements.ois1yRate && q1m) {
                     const mWon = q1m.mid_krw !== undefined ? q1m.mid_krw : q1m.mid / 100.0;
-                    elements.ois1yRate.textContent = `${mWon >= 0 ? "+" : ""}${mWon.toFixed(2)} 원 (${q1m.mid.toFixed(1)}전)`;
+                    elements.ois1yRate.textContent = `${mWon >= 0 ? "+" : ""}${mWon.toFixed(2)} / ${q1m.mid.toFixed(1)}`;
                 }
                 if (elements.ois3yRate && q3m) {
                     const mWon = q3m.mid_krw !== undefined ? q3m.mid_krw : q3m.mid / 100.0;
-                    elements.ois3yRate.textContent = `${mWon >= 0 ? "+" : ""}${mWon.toFixed(2)} 원 (${q3m.mid.toFixed(1)}전)`;
+                    elements.ois3yRate.textContent = `${mWon >= 0 ? "+" : ""}${mWon.toFixed(2)} / ${q3m.mid.toFixed(1)}`;
                 }
                 if (elements.ois5yRate && q6m) {
                     const mWon = q6m.mid_krw !== undefined ? q6m.mid_krw : q6m.mid / 100.0;
-                    elements.ois5yRate.textContent = `${mWon >= 0 ? "+" : ""}${mWon.toFixed(2)} 원 (${q6m.mid.toFixed(1)}전)`;
+                    elements.ois5yRate.textContent = `${mWon >= 0 ? "+" : ""}${mWon.toFixed(2)} / ${q6m.mid.toFixed(1)}`;
                 }
 
                 renderFwdKmbcQuoteTable(quotes, data.spot_fx, data.spot_fx_bid, data.spot_fx_ask);
@@ -4421,9 +4425,17 @@ document.addEventListener("DOMContentLoaded", () => {
             const askStr = (q.ask !== null && q.ask !== undefined) ? (typeof q.ask === "number" ? q.ask.toFixed(2) : q.ask) : "-";
             const spColor = midVal >= 0 ? "color:#15803d; font-weight:700;" : "color:#be123c; font-weight:700;";
             
+            // 브로커가 그 구간을 부르지 않은 테너는 그렇다고 말해야 합니다. 예전에는
+            // 기준호가가 그대로 남아 실시간 호가처럼 보였습니다.
+            const unquoted = q.quoted === false;
+            const srcTag = !unquoted ? ""
+                : q.interp_from
+                    ? ` <span class="rate-src rate-src--estimated" title="브로커 호가가 없어 ${q.interp_from.join("·")} 사이를 보간했습니다">보간</span>`
+                    : ` <span class="rate-src rate-src--none" title="브로커 호가가 없고 양옆도 비어 보간할 수 없습니다">호가없음</span>`;
+
             const ricDisplay = isCip
                 ? `<span style="color:#94a3b8; font-weight:600; text-align:center; display:block;">-</span>`
-                : `<span style="font-size:10px; color:var(--text-secondary); font-weight:600;">${q.ric}</span>`;
+                : `<span style="font-size:10px; color:var(--text-secondary); font-weight:600;">${q.ric}</span>${srcTag}`;
 
             tr.innerHTML = `
                 <td><strong>${q.tenor}</strong></td>
@@ -4909,6 +4921,39 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (e) {
             console.warn("Failed to save tickets to localStorage:", e);
         }
+    }
+
+
+    /**
+     * 시험 운영 고지. 하루에 한 번만 띄우고, 고르면 그날은 다시 안 띄웁니다.
+     *
+     * localStorage 는 비어 있거나 던져나올 수 있습니다(사생모드, 사이트
+     * 데이터 삭제). 그럴 때는 그냥 다시 보여 주는 쪽이 맞습니다 - 고지를
+     * 못 보여 주는 것보다 한 번 더 보여 주는 편이 낫습니다.
+     */
+    function initTestNotice() {
+        var box = document.getElementById("test-notice");
+        if (!box) return;
+        var KEY = "multipricer.testNoticeSkipUntil";
+        var today = new Date().toISOString().slice(0, 10);
+        var skip = "";
+        try { skip = window.localStorage.getItem(KEY) || ""; } catch (e) { skip = ""; }
+        if (skip !== today) box.hidden = false;
+
+        var ok = document.getElementById("test-notice-ok");
+        var chk = document.getElementById("test-notice-skip");
+        if (ok) {
+            ok.addEventListener("click", function () {
+                box.hidden = true;
+                if (chk && chk.checked) {
+                    try { window.localStorage.setItem(KEY, today); } catch (e) {}
+                }
+            });
+        }
+        // 바깥을 눌러도 닫힙니다. 고지일 뿐이라 가두고 막을 이유가 없습니다.
+        box.addEventListener("click", function (e) {
+            if (e.target === box) box.hidden = true;
+        });
     }
 
     function getActiveTicket(curr = state.currency) {
