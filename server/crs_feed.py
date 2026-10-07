@@ -218,17 +218,32 @@ class CRSFeed:
             return False
         return False
 
+    def _set_spot_fx(self, spot_fx: float, source: str = "Manual"):
+        """
+        락을 이미 쥔 쪽에서 부르는 몸통입니다.
+
+        예전에는 update_quote_manually 가 락을 쥔 채 update_spot_fx_manually 를
+        불렀고, 그 함수가 같은 락을 또 잡았습니다. threading.Lock 은 재진입이
+        안 되므로 그 자리에서 영원히 멈춥니다 - 락은 끝내 풀리지 않고, 이후의
+        get_snapshot 은 전부 그 뒤에 줄을 섭니다.
+
+        호스팅에서 /api/fwd/market-snapshot 과 /api/crs/market-snapshot 이
+        응답을 멈추고 다른 엔드포인트는 멀쩡했던 것이 이것입니다. 중계가
+        SPOT_FX 를 보내기 시작하면서 이 가지가 처음으로 실행됐습니다.
+        """
+        self.spot_fx = round(spot_fx, 2)
+        self.spot_fx_tick = datetime.datetime.now().strftime("%H:%M:%S") + f" ({source})"
+        self.last_update = datetime.datetime.now()
+
     def update_spot_fx_manually(self, spot_fx: float):
         with self._lock:
-            self.spot_fx = round(spot_fx, 2)
-            self.spot_fx_tick = datetime.datetime.now().strftime("%H:%M:%S") + " (Manual)"
-            self.last_update = datetime.datetime.now()
+            self._set_spot_fx(spot_fx)
 
     def update_quote_manually(self, tenor: str, mid: float, bid: Optional[float] = None,
                               ask: Optional[float] = None, source: str = "Manual"):
         with self._lock:
             if tenor == "SPOT" or tenor == "FX" or tenor == "SPOT_FX":
-                self.update_spot_fx_manually(mid)
+                self._set_spot_fx(mid, source)
                 return
             if tenor in self.quotes:
                 self.quotes[tenor]["mid"] = round(mid, 4)

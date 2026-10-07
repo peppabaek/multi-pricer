@@ -42,6 +42,7 @@ SUITES = [
     ("L34 KRW short-end RICs", "test_l34_krw_rics.py"),
     ("L35 Draft does not overwrite input", "test_l35_draft_defaults.py"),
     ("L36 Past fixings", "test_l36_fixing_history.py"),
+    ("L37 Feed lock deadlock", "test_l37_feed_locks.py"),
 ]
 
 total_fail = 0
