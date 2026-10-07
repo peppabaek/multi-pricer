@@ -598,32 +598,28 @@ def t_25():
             raise AssertionError("표시 스타일이 없음")
 
 
-@case("L24-27", "FX FWD 는 현물환도 함께 중계한다")
+@case("L24-27", "서버는 현물환을 받을 수 있다")
 def t_27():
     """
-    아웃라이트 = 현물 + 스왑포인트 입니다. 포인트만 올리고 현물을 빼면
-    클라우드의 현물은 기준호가(1343.50)에 머물고, 포인트가 아무리 정확해도
-    전 구간이 통째로 틀어집니다. 실제로 그렇게 돌고 있었습니다.
+    아웃라이트 = 현물 + 스왓포인트 입니다. 포인트만 올리면 클라우드의
+    현물은 기준호가(1343.50)에 머물고 전 구간이 통째로 틀어집니다.
+
+    다만 지금은 중계가 현물을 보내지 않습니다 - 보내기 시작한 직후부터
+    호스팅의 /api/fwd/market-snapshot 이 응답을 멈췄고, 같은 페이로드를
+    로컬에 넣으면 0.03초에 돌아와 아직 재현하지 못했습니다. 화면을 살려
+    두고 원인을 찾는 중입니다(desk_relay.read_local 의 주석).
+
+    받는 쪽은 그대로 두었습니다. 원인을 찾으면 보내는 줄 하나만 다시
+    켜면 되도록, 여기서 그 길이 막히지 않았는지를 지킵니다.
     """
-    sys.path.insert(0, os.path.join(ROOT, "tools"))
-    import importlib
-    dr = importlib.import_module("desk_relay")
+    from fastapi.testclient import TestClient
+    from server.app import app
 
-    body = {"is_connected": True, "spot_fx": 1338.47,
-            "spot_fx_bid": 1338.36, "spot_fx_ask": 1338.58,
-            "quotes": [{"tenor": "1M", "mid": -150.0, "bid": -200.0, "ask": -100.0}]}
-    saved = dr.call
-    dr.call = lambda url, payload=None, **kw: {"data": body}
-    try:
-        _, quotes = dr.read_local("http://x", "FWD")
-    finally:
-        dr.call = saved
-
-    spot = [q for q in quotes if q["tenor"] == "SPOT_FX"]
-    if not spot:
-        raise AssertionError(f"현물이 빠짐: {[q['tenor'] for q in quotes]}")
-    if spot[0]["mid"] != 1338.47 or spot[0]["bid"] != 1338.36:
-        raise AssertionError(f"현물 양방이 어긋남: {spot[0]}")
+    c = TestClient(app)
+    r = c.post("/api/quotes/push", json={"currency": "FWD", "quotes": [
+        {"tenor": "SPOT_FX", "mid": 1338.47, "bid": 1338.36, "ask": 1338.58}]})
+    if r.status_code != 200 or r.json()["data"]["applied"] != 1:
+        raise AssertionError(f"현물을 받지 못함: {r.status_code} {r.text[:140]}")
 
 
 @case("L24-28", "서버가 현물환 중계를 받아 반영한다")

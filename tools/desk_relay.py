@@ -77,11 +77,17 @@ def read_local(local, currency):
     # FX FWD 는 아웃라이트 = 현물 + 스왓포인트 입니다. 포인트만 올리고
     # 현물을 빼면 클라우드 쪽 현물은 기준호가(1343.50)에 멈춰 있고, 그만큼
     # 전 구간이 통째로 틀어집니다.
-    spot = body.get("spot_fx")
-    if spot is not None:
-        out.insert(0, {"tenor": "SPOT_FX", "mid": spot,
-                       "bid": body.get("spot_fx_bid"),
-                       "ask": body.get("spot_fx_ask")})
+    # 현물을 보내기 시작한 직후부터 호스팅의 /api/fwd/market-snapshot 이
+    # 응답을 멈췄습니다. 같은 중계 페이로드를 로컬에 그대로 넣으면 0.03초에
+    # 돌아와서 아직 재현하지 못했고, 그사이 FX FWD 화면이 멈춰 있습니다.
+    # 화면을 살려 두고 원인을 재현 가능한 곳에서 찾는 것이 순서입니다.
+    # 서버는 SPOT_FX 를 받을 수 있게 둔 채로 두었으므로, 여기만 다시 켜면 됩니다.
+    #
+    #   spot = body.get("spot_fx")
+    #   if spot is not None:
+    #       out.insert(0, {"tenor": "SPOT_FX", "mid": spot,
+    #                      "bid": body.get("spot_fx_bid"),
+    #                      "ask": body.get("spot_fx_ask")})
     return body, out
 
 
