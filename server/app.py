@@ -1818,20 +1818,39 @@ def get_fwd_market_snapshot(pricing_date: Optional[str] = None, reload: Optional
             kmbc_fwd_feed.trigger_on_demand_refresh()
         except Exception as e:
             print(f"[KMBC SNAPSHOT ERROR] On-demand refresh error: {e}")
+    # 호스팅에서 이 핸들러 하나만 응답을 멈춘 일이 있었습니다. uvicorn 은 요청이
+    # 끝나야 기록하므로 로그에 줄 자체가 남지 않았고, 예외도 OOM 도 재시작도
+    # 없었으며 다른 엔드포인트는 그동안 멀쩡히 200 을 돌려줬습니다. 어느 단계에서
+    # 멈췄는지 알 방법이 없었습니다 - 단계마다 남깁니다. 평소에는 조용하고
+    # 느려졌을 때만 입을 엽니다.
+    _t0 = time.time()
+    _phase = {"at": "start"}
+
+    def _mark(name):
+        el = time.time() - _t0
+        if el > 3.0:
+            print(f"[FWD SNAPSHOT] {_phase['at']} -> {name} 까지 {el:.1f}초", flush=True)
+        _phase["at"] = name
+
     snap_kmbc = kmbc_fwd_feed.get_snapshot()
+    _mark("kmbc")
     snap_crs = crs_feed.get_snapshot()
+    _mark("crs")
     snap_usd = tradition_feed.get_snapshot()
-    
+    _mark("usd")
+
     p_date = parse_date(pricing_date) if pricing_date else datetime.date.today()
     s_date = add_business_days(p_date, 2, "SEB_NYB")
-    
+
     spot_fx = snap_kmbc.get("spot_fx", 1357.85)
     crs_quotes = [(q["tenor"], float(q["mid"])) for q in snap_crs.get("quotes", [])]
     krw_fx_curve = get_cached_crs_curve(p_date, s_date, crs_quotes, spot_fx)
-    
+    _mark("crs_curve")
+
     usd_quotes = [(q["tenor"], float(q["mid"])) for q in snap_usd.get("quotes", [])]
     usd_sofr_curve = get_cached_sofr_curve(p_date, s_date, usd_quotes)
-    
+    _mark("sofr_curve")
+
     kmbc_q_list = snap_kmbc.get("quotes", [])
     pricer = FwdSwapPricer(krw_fx_curve, usd_sofr_curve, spot_fx, p_date, calendar="SEB_NYB", kmbc_quotes=kmbc_q_list)
     
@@ -1842,6 +1861,7 @@ def get_fwd_market_snapshot(pricing_date: Optional[str] = None, reload: Optional
     
     for t in std_tenors:
         leg = pricer.price_single_leg(maturity=t, notional_usd=10_000_000.0, margin_bp=0.0)
+        _mark("leg_" + t)
         sp_won = leg["sp_theo"]
         sp_jeon = round(sp_won * 100.0, 2)
         

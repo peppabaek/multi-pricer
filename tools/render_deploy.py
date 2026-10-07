@@ -11,6 +11,8 @@ Render 배포를 커맨드라인에서 거는 도구.
     python tools/render_deploy.py --deploy       # 최신 커밋으로 배포
     python tools/render_deploy.py --deploy --watch   # 배포 후 끝날 때까지 확인
     python tools/render_deploy.py --check <URL>  # 배포된 주소 동작 확인
+    python tools/render_deploy.py --logs         # 최근 로그
+    python tools/render_deploy.py --logs --minutes 180 --grep fwd
 
 옵션 --service <이름|ID> 로 서비스를 고를 수 있습니다(기본: multipricer).
 """
@@ -19,6 +21,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 API = "https://api.render.com/v1"
@@ -128,6 +131,43 @@ def cmd_deploy(key, name, watch=False):
     print("시간 내에 끝나지 않았습니다 — 대시보드에서 확인하세요")
 
 
+def cmd_logs(key, name, limit=200, contains=None, minutes=None,
+             since=None, until=None):
+    """
+    로그를 가져온다.
+
+    호스팅에서만 멈추는 일은 여기서밖에 볼 수 없습니다. 로컬에서 같은
+    요청을 넣으면 0.03초에 돌아오는 것을 종일 추측하는 것보다, 그쪽
+    기록을 읽는 편이 빠릅니다.
+    """
+    svc = _pick(key, name)
+    params = ["limit=%d" % max(1, min(int(limit), 1000)),
+              "ownerId=%s" % svc.get("ownerId", ""),
+              "resource=%s" % svc.get("id")]
+    import datetime as _dt
+    if minutes:
+        start = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(minutes=int(minutes))
+        params.append("startTime=" + start.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    # 멈춰 있던 구간을 집어서 보려면 끝 시각이 필요합니다. 마지막 N개만
+    # 부르면 사건 이후의 멀줦한 기록만 돌아옵니다. UTC 로 줍니다.
+    if since:
+        params.append("startTime=" + str(since))
+    if until:
+        params.append("endTime=" + str(until))
+    if contains:
+        params.append("text=" + urllib.parse.quote(contains))
+    res = _call("/logs?" + "&".join(p for p in params if not p.endswith("=")), key)
+    rows = res.get("logs", res if isinstance(res, list) else [])
+    if not rows:
+        print("로그가 없습니다 (기간을 늘려 보세요: --minutes 180)")
+        return
+    for row in rows:
+        ts = str(row.get("timestamp", ""))[:19].replace("T", " ")
+        print("%s  %s" % (ts, (row.get("message") or "").rstrip()))
+    print()
+    print("%d줄" % len(rows))
+
+
 def cmd_check(url):
     """키 없이도 실행됩니다: 배포된 주소가 제대로 응답하는지만 봅니다."""
     import base64
@@ -224,6 +264,12 @@ def main():
         name = args[args.index("--service") + 1]
 
     key = _load_key()
+    if "--logs" in args:
+        def opt(flag, default=None):
+            return args[args.index(flag) + 1] if flag in args else default
+        return cmd_logs(key, name, limit=opt("--limit", 200),
+                        contains=opt("--grep"), minutes=opt("--minutes"),
+                        since=opt("--since"), until=opt("--until"))
     if "--deploy" in args:
         return cmd_deploy(key, name, watch="--watch" in args)
     if "--env" in args:
