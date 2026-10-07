@@ -23,6 +23,7 @@ import datetime
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+import threading
 import time
 import asyncio
 import warnings
@@ -1823,8 +1824,25 @@ def get_fwd_market_snapshot(pricing_date: Optional[str] = None, reload: Optional
     # 없었으며 다른 엔드포인트는 그동안 멀쩡히 200 을 돌려줬습니다. 어느 단계에서
     # 멈췄는지 알 방법이 없었습니다 - 단계마다 남깁니다. 평소에는 조용하고
     # 느려졌을 때만 입을 엽니다.
+    # 단계가 끝날 때만 찍으면 단계 '안에서' 멈춘 경우에는 끝내 아무것도 남지
+    # 않습니다. 실제로 그랬습니다. 그래서 따로 지켜보는 타이머를 둡니다 -
+    # 정해진 시간이 지나도 요청이 살아 있으면, 그 시점에 무엇을 하고 있었는지
+    # 타이머가 대신 말합니다.
     _t0 = time.time()
     _phase = {"at": "start"}
+    _watchers = []
+
+    def _watch(after):
+        def shout():
+            print(f"[FWD SNAPSHOT] {after:.0f}초 경과 - '{_phase['at']}' 에서 멈춰 있음",
+                  flush=True)
+        t = threading.Timer(after, shout)
+        t.daemon = True
+        t.start()
+        _watchers.append(t)
+
+    for _after in (10.0, 30.0, 90.0):
+        _watch(_after)
 
     def _mark(name):
         el = time.time() - _t0
@@ -1903,7 +1921,12 @@ def get_fwd_market_snapshot(pricing_date: Optional[str] = None, reload: Optional
                 "df_usd": round(leg["df_usd"], 6),
                 "df_krw": round(leg["df_krw"], 6)
             })
-        
+
+    # 끝났으면 감시 타이머를 거둡니다. 두면 정상 요청마다 한참 뒤에
+    # "멈춰 있음" 이 거짓으로 찍힙니다.
+    for _t in _watchers:
+        _t.cancel()
+
     return {
         "status": "success",
         "data": {
