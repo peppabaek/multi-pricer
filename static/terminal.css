@@ -605,3 +605,13 @@ label, .form-label, .param-label {
 @media (prefers-reduced-motion: reduce) {
     * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* 로고. 헤더가 짙은 남색이라 바깥을 투명하게 깎아 둔 파일을 씁니다.
+   ⚡ 아이콘은 이 테마에서 숨겨져 있어 그 자리를 대신합니다. */
+.brand-logo {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    object-fit: contain;
+    display: block;
+}

@@ -15,8 +15,8 @@
 import os
 import sys
 
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                   "static", "icons")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.path.join(ROOT, "static", "icons")
 NAVY = (11, 31, 63)          # m.css 의 탭 바 색
 BLUE = (37, 99, 235)
 WHITE = (255, 255, 255)
@@ -39,21 +39,30 @@ def _font(px):
 
 
 def draw(size):
-    from PIL import Image, ImageDraw
+    """
+    로고를 남색 바탕에 올립니다.
+
+    예전에는 "MP" 를 그렸습니다. 32px 에서도 읽히긴 했지만 어느 은행의
+    도구인지는 말해 주지 않았습니다. 동근 마크는 작게 줄여도 형태가
+    남습니다. 로고 파일은 바깥이 투명해서 바탕색이 그대로 비칩니다.
+    """
+    from PIL import Image
+
     img = Image.new("RGB", (size, size), NAVY)
-    d = ImageDraw.Draw(img)
+    logo_path = os.path.join(ROOT, "static", "logo.png")
+    if not os.path.exists(logo_path):
+        # 로고가 없으면 아래 띄라도 남깁니다 - 빈 네모를 내보내는 것보다 낫습니다.
+        from PIL import ImageDraw
+        d = ImageDraw.Draw(img)
+        bar = max(2, int(size * 0.10))
+        d.rectangle([0, size - bar, size, size], fill=BLUE)
+        return img
 
-    # 아래쪽 파란 띠. 32px 에서 글자만 남으면 무엇인지 알 수 없어서, 멀리서도
-    # 구분되는 형태를 하나 둡니다.
-    bar = max(2, int(size * 0.10))
-    d.rectangle([0, size - bar, size, size], fill=BLUE)
-
-    text = "MP"
-    f = _font(int(size * 0.46))
-    box = d.textbbox((0, 0), text, font=f)
-    d.text(((size - (box[2] - box[0])) / 2 - box[0],
-            (size - bar - (box[3] - box[1])) / 2 - box[1]),
-           text, font=f, fill=WHITE)
+    logo = Image.open(logo_path).convert("RGBA")
+    inner = max(1, int(size * 0.76))        # 가장자리 여백
+    logo = logo.resize((inner, inner), Image.LANCZOS)
+    off = (size - inner) // 2
+    img.paste(logo, (off, off), logo)
     return img
 
 

@@ -501,3 +501,12 @@ body { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
     display: flex; align-items: center; gap: 6px;
     margin-bottom: 12px; font-size: 13px; color: #475569;
 }
+
+/* 로고는 PC 와 같은 파일을 씁니다. */
+.brand-logo {
+    width: 22px;
+    height: 22px;
+    flex: 0 0 auto;
+    object-fit: contain;
+}
+.m-head .m-logo { margin-right: auto; }

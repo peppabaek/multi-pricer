@@ -2068,7 +2068,7 @@ os.makedirs(static_dir, exist_ok=True)
 # script against freshly deployed markup - which does not look like a stale cache, it
 # looks like the change was never made. Stamp the URLs from the files on disk instead,
 # so the query changes whenever the file does and never when it does not.
-_ASSET_REF = re.compile(r'(?P<attr>href|src)="(?P<file>[\w.-]+\.(?:js|css))(?:\?[^"]*)?"')
+_ASSET_REF = re.compile(r'(?P<attr>href|src)="(?P<file>[\w.-]+\.(?:js|css|png|svg))(?:\?[^"]*)?"')
 
 
 def _asset_stamp(name: str) -> str:

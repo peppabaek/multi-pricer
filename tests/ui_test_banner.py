@@ -55,6 +55,25 @@ def check(browser, base, where, path, viewport, mobile):
     if errs:
         bad(f"{where}: 스크립트 오류 {errs[0][:120]}")
 
+    logo = pg.locator(".brand-logo").first
+    if logo.count() == 0 or not logo.is_visible():
+        bad(f"{where}: 헤더에 로고가 없음")
+    else:
+        got = pg.evaluate("""() => { const i = document.querySelector('.brand-logo');
+            const r = i.getBoundingClientRect();
+            const h = i.closest('header').getBoundingClientRect();
+            return { ok: i.complete && i.naturalWidth > 0,
+                     w: Math.round(r.width), h: Math.round(r.height),
+                     inside: r.top >= h.top - 1 && r.bottom <= h.bottom + 1 }; }""")
+        if not got["ok"]:
+            bad(f"{where}: 로고 파일이 로드되지 않음 (깨진 이미지)")
+        elif got["w"] < 14 or got["h"] < 14:
+            bad(f"{where}: 로고가 너무 작음 {got['w']}x{got['h']}")
+        elif not got["inside"]:
+            bad(f"{where}: 로고가 헤더 밖으로 나감")
+        else:
+            ok(f"{where}: 헤더 로고 {got['w']}x{got['h']}")
+
     tag = pg.locator(".test-tag").first
     if tag.count() == 0 or not tag.is_visible():
         bad(f"{where}: 헤더에 TEST 표기가 보이지 않음")
