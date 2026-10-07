@@ -741,10 +741,14 @@ def _apply_quote(feed, tenor: str, mid: float, bid=None, ask=None) -> Optional[s
     if fn is None:
         raise AttributeError(f"{type(feed).__name__} 에 호가 갱신 메서드가 없습니다")
 
-    known = _feed_quotes(feed)
-    if known:
-        if tenor.strip().upper() not in {str(k).strip().upper() for k in known}:
-            return "피드가 모르는 테너"
+    # 현물환은 테너 목록에 없습니다. FX FWD 의 아웃라이트는 현물 + 스왑포인트라
+    # 현물이 빠지면 포인트가 아무리 정확해도 전 구간이 통째로 틀어집니다.
+    is_spot = tenor.strip().upper() in ("SPOT_FX", "SPOT")
+    if not (is_spot and hasattr(feed, "spot_fx")):
+        known = _feed_quotes(feed)
+        if known:
+            if tenor.strip().upper() not in {str(k).strip().upper() for k in known}:
+                return "피드가 모르는 테너"
 
     # 손으로 넣은 값은 덮지 않습니다.
     #

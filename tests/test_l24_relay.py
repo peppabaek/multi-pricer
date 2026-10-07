@@ -598,6 +598,61 @@ def t_25():
             raise AssertionError("표시 스타일이 없음")
 
 
+@case("L24-27", "FX FWD 는 현물환도 함께 중계한다")
+def t_27():
+    """
+    아웃라이트 = 현물 + 스왑포인트 입니다. 포인트만 올리고 현물을 빼면
+    클라우드의 현물은 기준호가(1343.50)에 머물고, 포인트가 아무리 정확해도
+    전 구간이 통째로 틀어집니다. 실제로 그렇게 돌고 있었습니다.
+    """
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import importlib
+    dr = importlib.import_module("desk_relay")
+
+    body = {"is_connected": True, "spot_fx": 1338.47,
+            "spot_fx_bid": 1338.36, "spot_fx_ask": 1338.58,
+            "quotes": [{"tenor": "1M", "mid": -150.0, "bid": -200.0, "ask": -100.0}]}
+    saved = dr.call
+    dr.call = lambda url, payload=None, **kw: {"data": body}
+    try:
+        _, quotes = dr.read_local("http://x", "FWD")
+    finally:
+        dr.call = saved
+
+    spot = [q for q in quotes if q["tenor"] == "SPOT_FX"]
+    if not spot:
+        raise AssertionError(f"현물이 빠짐: {[q['tenor'] for q in quotes]}")
+    if spot[0]["mid"] != 1338.47 or spot[0]["bid"] != 1338.36:
+        raise AssertionError(f"현물 양방이 어긋남: {spot[0]}")
+
+
+@case("L24-28", "서버가 현물환 중계를 받아 반영한다")
+def t_28():
+    """
+    현물은 테너 목록에 없어서 '피드가 모르는 테너' 로 거부되고 있었습니다.
+    중계는 보냈다고 세고 서버는 버리는, 가장 알아채기 어려운 모양입니다.
+    """
+    from fastapi.testclient import TestClient
+    from server.app import app
+
+    c = TestClient(app)
+    r = c.post("/api/quotes/push", json={"currency": "FWD", "quotes": [
+        {"tenor": "SPOT_FX", "mid": 1338.47, "bid": 1338.36, "ask": 1338.58}]})
+    if r.status_code != 200:
+        raise AssertionError(f"HTTP {r.status_code}: {r.text[:140]}")
+    if r.json()["data"]["applied"] != 1:
+        raise AssertionError(f"반영되지 않음: {r.json()['data']}")
+
+    d = c.get("/api/fwd/market-snapshot").json()["data"]
+    if abs(d["spot_fx"] - 1338.47) > 1e-9:
+        raise AssertionError(f"현물이 {d['spot_fx']}")
+    if abs(d["spot_fx_bid"] - 1338.36) > 1e-9 or abs(d["spot_fx_ask"] - 1338.58) > 1e-9:
+        raise AssertionError(f"현물 양방이 {d['spot_fx_bid']}/{d['spot_fx_ask']} "
+                             "- mid 만 받으면 아웃라이트 양방이 틀어집니다")
+    if "Relay" not in str(d.get("spot_fx_tick")):
+        raise AssertionError(f"출처가 {d.get('spot_fx_tick')!r}")
+
+
 if __name__ == "__main__":
     print("\n=== L24 데스크 → 클라우드 중계 ===")
     sys.exit(1 if run_all("L24") else 0)

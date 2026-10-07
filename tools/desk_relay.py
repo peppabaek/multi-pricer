@@ -69,11 +69,20 @@ def read_local(local, currency):
     # 응답 모양이 통화마다 다르다. KRW 는 호가가 최상위에 있어, 메타데이터만 보고
     # "호가 없음" 으로 건너뛰고 있었다.
     quotes = body.get("quotes") or payload.get("quotes") or []
-    return body, [
+    out = [
         {"tenor": q.get("tenor"), "mid": q.get("mid"),
          "bid": q.get("bid"), "ask": q.get("ask")}
         for q in quotes if q.get("tenor") and q.get("mid") is not None
     ]
+    # FX FWD 는 아웃라이트 = 현물 + 스왓포인트 입니다. 포인트만 올리고
+    # 현물을 빼면 클라우드 쪽 현물은 기준호가(1343.50)에 멈춰 있고, 그만큼
+    # 전 구간이 통째로 틀어집니다.
+    spot = body.get("spot_fx")
+    if spot is not None:
+        out.insert(0, {"tenor": "SPOT_FX", "mid": spot,
+                       "bid": body.get("spot_fx_bid"),
+                       "ask": body.get("spot_fx_ask")})
+    return body, out
 
 
 def load_env_file():

@@ -252,6 +252,12 @@ class KMBCFwdFeed:
         with self._lock:
             if tenor == "SPOT_FX" or tenor == "SPOT":
                 self.spot_fx = float(new_mid)
+                # 현물도 양방으로 불립니다. mid 만 받으면 화면의 bid/ask 가
+                # 기준호가에 멈춰 있어, 아웃라이트 양방이 틀어집니다.
+                if new_bid is not None:
+                    self.spot_fx_bid = float(new_bid)
+                if new_ask is not None:
+                    self.spot_fx_ask = float(new_ask)
                 self.spot_fx_tick = (
                     datetime.datetime.now().strftime("%H:%M:%S") + f" ({source})")
                 return True
