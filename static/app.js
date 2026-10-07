@@ -1,5 +1,5 @@
 /**
- * MULTI-CURRENCY IRS LIVE TERMINAL FRONTEND LOGIC (v3.0 PRO)
+ * MULTI-CURRENCY IRS LIVE TERMINAL FRONTEND LOGIC (v1.0 PRO)
  * - Multi-Currency Switcher: USD SOFR OIS ↔ KRW CD 91D IRS
  * - 1,000s Comma Masking for Notional (USD $ / KRW ₩)
  * - Odd Tenor Custom Input & Direct Date Calculations
@@ -4925,35 +4925,70 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
     /**
-     * 시험 운영 고지. 하루에 한 번만 띄우고, 고르면 그날은 다시 안 띄웁니다.
+     * 시험 운영 고지.
      *
-     * localStorage 는 비어 있거나 던져나올 수 있습니다(사생모드, 사이트
-     * 데이터 삭제). 그럴 때는 그냥 다시 보여 주는 쪽이 맞습니다 - 고지를
-     * 못 보여 주는 것보다 한 번 더 보여 주는 편이 낫습니다.
+     * 접속할 때마다 한 번 띄우고, 그 탭에서는 다시 띄우지 않습니다.
+     * "오늘은 다시 보지 않기" 를 고르면 그날은 건너뜁니다.
+     *
+     * 다만 한 번 끕다고 영영 못 보게 두면 안 됩니다 - 다른 사람에게
+     * 보여 줄 때도, 내용을 다시 읽고 싶을 때도 길이 없습니다. 헤더의
+     * TEST 표기를 누르면 언제든 다시 뜨게 했습니다.
+     *
+     * 저장소는 비어 있거나 던져나올 수 있습니다(사생모드, 사이트 데이터
+     * 삭제). 그럴 때는 그냥 다시 보여 주는 쪽이 맞습니다.
      */
     function initTestNotice() {
         var box = document.getElementById("test-notice");
         if (!box) return;
-        var KEY = "multipricer.testNoticeSkipUntil";
+
+        var DAY_KEY = "multipricer.testNoticeSkipUntil";
+        var SESSION_KEY = "multipricer.testNoticeSeen";
         var today = new Date().toISOString().slice(0, 10);
-        var skip = "";
-        try { skip = window.localStorage.getItem(KEY) || ""; } catch (e) { skip = ""; }
-        if (skip !== today) box.hidden = false;
+
+        function read(store, key) {
+            try { return window[store].getItem(key) || ""; } catch (e) { return ""; }
+        }
+        function write(store, key, value) {
+            try { window[store].setItem(key, value); } catch (e) {}
+        }
+
+        function show() { box.hidden = false; }
+        function hide(remember) {
+            box.hidden = true;
+            write("sessionStorage", SESSION_KEY, "1");
+            if (remember) write("localStorage", DAY_KEY, today);
+        }
+
+        if (read("localStorage", DAY_KEY) !== today
+            && read("sessionStorage", SESSION_KEY) !== "1") {
+            show();
+        }
 
         var ok = document.getElementById("test-notice-ok");
         var chk = document.getElementById("test-notice-skip");
         if (ok) {
             ok.addEventListener("click", function () {
-                box.hidden = true;
-                if (chk && chk.checked) {
-                    try { window.localStorage.setItem(KEY, today); } catch (e) {}
-                }
+                hide(Boolean(chk && chk.checked));
             });
         }
         // 바깥을 눌러도 닫힙니다. 고지일 뿐이라 가두고 막을 이유가 없습니다.
         box.addEventListener("click", function (e) {
-            if (e.target === box) box.hidden = true;
+            if (e.target === box) hide(false);
         });
+
+        // TEST 표기를 누르면 언제든 다시 뚝니다.
+        var tags = document.querySelectorAll(".test-tag");
+        for (var i = 0; i < tags.length; i++) {
+            if (tags[i].closest("#test-notice")) continue;
+            tags[i].setAttribute("role", "button");
+            tags[i].setAttribute("tabindex", "0");
+            tags[i].title = "시험 운영 중입니다 — 눌러서 안내를 다시 보세요";
+            tags[i].style.cursor = "pointer";
+            tags[i].addEventListener("click", show);
+            tags[i].addEventListener("keydown", function (e) {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); show(); }
+            });
+        }
     }
 
     function getActiveTicket(curr = state.currency) {

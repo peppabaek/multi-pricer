@@ -110,6 +110,17 @@ def check(browser, base, where, path, viewport, mobile):
     else:
         ok(f"{where}: 확인하면 닫힘")
 
+    # 끈 뒤에도 TEST 표기를 누르면 다시 떠야 합니다. 한 번 끄고 영영 못 보면
+    # 다른 사람에게 보여 줄 수도, 내용을 다시 읽을 수도 없습니다.
+    pg.click(".test-tag")
+    pg.wait_for_timeout(600)
+    if modal.is_hidden():
+        bad(f"{where}: TEST 표기를 눌러도 안내가 다시 뜨지 않음")
+    else:
+        ok(f"{where}: TEST 표기를 누르면 다시 뜸")
+    pg.click("#test-notice-ok")
+    pg.wait_for_timeout(500)
+
     # 같은 브라우저(같은 저장소)로 다시 들어오면 그날은 안 떠야 합니다.
     pg2 = ctx.new_page()
     pg2.goto(base + path, wait_until="load", timeout=120000)
@@ -124,6 +135,44 @@ def check(browser, base, where, path, viewport, mobile):
     else:
         ok(f"{where}: 고지를 꺼도 TEST 표기는 남음")
     ctx.close()
+
+
+def fresh_session(browser, base, where, path, viewport, mobile):
+    """
+    체크박스를 고르지 않고 닫았으면, 다음에 열 때 다시 떠야 합니다.
+
+    예전에는 "오늘은 다시 보지 않기" 만 저장했기 때문에, 그걸 한 번 고른
+    사람은 그날 내내 안내를 볼 방법이 없었습니다. 이제 접속할 때마다 한
+    번씩 뜨고, 그 탭 세션 안에서만 조용합니다.
+    """
+    ctx = browser.new_context(viewport=viewport, is_mobile=mobile, has_touch=mobile)
+    pg = ctx.new_page()
+    pg.goto(base + path, wait_until="load", timeout=120000)
+    pg.wait_for_timeout(5000)
+    pg.click("#test-notice-ok")          # 체크하지 않고 닫기
+    pg.wait_for_timeout(500)
+
+    # 같은 탭을 새로고침하는 것이 "조용해야 하는" 경우입니다. 새 탭은
+    # sessionStorage 가 따로라 다시 뜨고, 그게 맞습니다 - 새로 연 창이니까요.
+    pg.reload(wait_until="load", timeout=120000)
+    pg.wait_for_timeout(5000)
+    same = pg.locator("#test-notice")
+    if same.count() and same.is_visible():
+        bad(f"{where}: 같은 탭을 새로고침했는데 또 뜸")
+    else:
+        ok(f"{where}: 같은 탭에서는 새로고침해도 뜨지 않음")
+    ctx.close()
+
+    ctx2 = browser.new_context(viewport=viewport, is_mobile=mobile, has_touch=mobile)
+    pg3 = ctx2.new_page()
+    pg3.goto(base + path, wait_until="load", timeout=120000)
+    pg3.wait_for_timeout(5000)
+    again = pg3.locator("#test-notice")
+    if not (again.count() and again.is_visible()):
+        bad(f"{where}: 새로 접속했는데 안내가 뜨지 않음")
+    else:
+        ok(f"{where}: 새로 접속하면 다시 뜸")
+    ctx2.close()
 
 
 def main():
@@ -147,8 +196,11 @@ def main():
             print("\n--- 데스크톱 ---")
             check(browser, base, "데스크톱", "/?view=pc",
                   {"width": 1680, "height": 1050}, False)
+            fresh_session(browser, base, "데스크톱", "/?view=pc",
+                          {"width": 1680, "height": 1050}, False)
             print("\n--- 휴대폰 /m ---")
             check(browser, base, "휴대폰", "/m", L.PHONE, True)
+            fresh_session(browser, base, "휴대폰", "/m", L.PHONE, True)
             browser.close()
     finally:
         srv.terminate()
